@@ -21,19 +21,22 @@ Pool :: #import "Pool";
     #load "macosx.jai"; // Cocoa app stuff/entry point
 }
 
-rand_01    :: random_get_zero_to_one;
-rand_range :: random_get_within_range;
-
 // Game constants
+ENEMY_SIZE :: 0.45;
 ENEMY_FIRE_RATE :: 0.3;
 ENEMY_MOVE_SPEED :: 3.5;
 ENEMY_BULLET_SPEED :: 5.0;
 ENEMY_SHOOT_ANGLE_SPEED :: PI * .4;
+ENEMY_SPAWN_DELAY_MIN :: 0.6;
+ENEMY_SPAWN_DELAY_MAX :: 2.3;
+ENEMY_MAX_COUNT :: 6;
+ENEMY_SPAWN_AT_A_TIME :: 2;
 
 PLAYER_SPEED :: 9.0;
 PLAYER_HURT_COOLDOWN :: 1.0;
 PLAYER_BULLET_SPEED :: 15.0;
 PLAYER_FIRE_RATE :: 0.15;
+PLAYER_MOVE_SPEED_ADD_TO_BULLET :: 3;
 
 BULLET_SIZE :: 0.25;
 
@@ -78,8 +81,8 @@ Enemy_State :: enum {
 Enemy :: struct {
     using actor: Actor;
 
-    extents.x = 0.5;
-    extents.y = 0.5;
+    extents.x = ENEMY_SIZE;
+    extents.y = ENEMY_SIZE;
 
     state: Enemy_State;
     timer: float;
@@ -103,9 +106,9 @@ Occupant :: enum {
 }
 
 MENU_SELECTION_CONTINUE_GAME :: 0;
-MENU_SELECTION_RESET_GAME :: 1;
-MENU_SELECTION_QUIT       :: 2;
-MAX_MENU_SELECTION        :: 2;
+MENU_SELECTION_RESET_GAME    :: 1;
+MENU_SELECTION_QUIT          :: 2;
+MAX_MENU_SELECTION           :: 2;
 
 FONT_HEIGHT :: 48;
 
@@ -203,6 +206,7 @@ game: struct {
     player: Player;
     bullets: [..]Bullet;
     enemies: [..]Enemy;
+    enemy_spawn_cooldown: float;
 
     // birds animation state
     bird_models: [3] *Model;
@@ -720,12 +724,12 @@ update_game :: (dt: float) {
 
     // update player
     {
-        delta : Vector2;
+        move_delta : Vector2;
         for vec, idx: direction_vectors if input_direction[idx]
-            delta += vec;
-        normalize_vec2(*delta);
+            move_delta += vec;
+        normalize_vec2(*move_delta);
 
-        move_actor(*player, delta * PLAYER_SPEED * dt);
+        move_actor(*player, move_delta * PLAYER_SPEED * dt);
 
         if timer_done(dt, *player.hurt_cooldown) {
             for * enemies {
@@ -748,7 +752,7 @@ update_game :: (dt: float) {
 
                 using bullet: Bullet;
                 pos = player.pos;
-                vel = fire_vector * PLAYER_BULLET_SPEED;
+                vel = fire_vector * PLAYER_BULLET_SPEED + move_delta * PLAYER_MOVE_SPEED_ADD_TO_BULLET;
                 array_add(*bullets, bullet);
             }
         }
@@ -757,7 +761,7 @@ update_game :: (dt: float) {
     determine_next_state :: inline (using enemy: *Enemy) {
         using Enemy_State;
 
-        roll := rand_01();
+        roll := random_get_zero_to_one();
         if #complete state == {
             case SPAWNING;
                 if roll < .5 state = FIRING;
@@ -780,14 +784,14 @@ update_game :: (dt: float) {
         determine_next_state(enemy);
         if state == {
             case SPAWNING;
-                timer = rand_range(1, 1.2);
+                timer = random_get_within_range(1, 1.2);
             case CHASING_PLAYER;
-                timer = rand_range(1, 3);
+                timer = random_get_within_range(1, 3);
             case WAITING;
-                timer = rand_range(2, 4);
+                timer = random_get_within_range(2, 4);
             case FIRING;
-                timer = rand_range(3, 4);
-                shoot_angle = rand_01() * TAU;
+                timer = random_get_within_range(3, 4);
+                shoot_angle = random_get_zero_to_one() * TAU;
         }
     }
 
@@ -822,6 +826,13 @@ update_game :: (dt: float) {
 
     }
 
+    if enemies.count < ENEMY_MAX_COUNT {
+        if timer_done(dt, *enemy_spawn_cooldown, random_get_within_range(ENEMY_SPAWN_DELAY_MIN, ENEMY_SPAWN_DELAY_MAX)) {
+            for 0..(cast(int)(random_get_zero_to_one() * ENEMY_SPAWN_AT_A_TIME + 1) - 1)
+                spawn_new_enemy();
+        }
+    }
+
     // update bullets
     for *bullet: bullets {
         bullet.life_timer -= dt;
@@ -834,7 +845,7 @@ update_game :: (dt: float) {
 
         if bullet.friendly {
             for *enemy: enemies {
-                if overlaps(bullet, enemy) {
+                if enemy.state != Enemy_State.SPAWNING && overlaps(bullet, enemy) {
                     remove enemy;
                     play_sound(game.hit_wall_sound, true);
                     game.screen_shake_percent = 0.85;
@@ -981,6 +992,16 @@ play_sound :: (data: *Mixer_Sound_Data, perturb: bool = true, volume := 0.7) -> 
     return stream;
 }
 
+spawn_new_enemy :: () {
+    enemy: Enemy;
+    enemy.pos.x = random_get_within_range(0, INITIAL_GRID_SIZE - 1);
+    enemy.pos.y = random_get_within_range(0, INITIAL_GRID_SIZE - 1);
+
+    enemy.state = Enemy_State.SPAWNING;
+    enemy.timer = random_get_within_range(1.0, 2.0);
+
+    array_add(*game.enemies, enemy);
+}
 
 reset_game :: () {
     {
@@ -991,16 +1012,8 @@ reset_game :: () {
     // setup enemies
     {
         array_reset(*game.enemies);
-
         for 0..4 {
-            enemy: Enemy;
-            enemy.pos.x = random_get_within_range(0, 10);
-            enemy.pos.y = random_get_within_range(0, 10);
-
-            enemy.state = Enemy_State.SPAWNING;
-            enemy.timer = random_get_within_range(1.0, 2.0);
-
-            array_add(*game.enemies, enemy);
+            spawn_new_enemy();
         }
     }
     
