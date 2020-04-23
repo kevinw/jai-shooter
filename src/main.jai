@@ -21,13 +21,75 @@ Pool :: #import "Pool";
     #load "macosx.jai"; // Cocoa app stuff/entry point
 }
 
+rand_01    :: random_get_zero_to_one;
+rand_range :: random_get_within_range;
+
+// Game constants
+ENEMY_FIRE_RATE :: 0.3;
+ENEMY_MOVE_SPEED :: 3.5;
+ENEMY_BULLET_SPEED :: 5.0;
+ENEMY_SHOOT_ANGLE_SPEED :: PI * .4;
+
+PLAYER_SPEED :: 9.0;
+PLAYER_HURT_COOLDOWN :: 1.0;
+PLAYER_BULLET_SPEED :: 15.0;
+PLAYER_FIRE_RATE :: 0.15;
+
+BULLET_SIZE :: 0.25;
+
 Direction :: enum { UP; DOWN; LEFT; RIGHT; }
 direction_vectors: [4]Vector2;
 
-Bullet :: struct {
+AABB :: struct {
     pos: Vector2;
+    extents: Vector2;
+}
+
+overlaps :: (a: *AABB, b: *AABB) -> bool {
+    t := b.pos - a.pos;
+    return abs(t.x) <= (a.extents.x + b.extents.x) &&
+        abs(t.y) <= (a.extents.y + b.extents.y);
+}
+
+Bullet :: struct {
+    using aabb: AABB;
     vel: Vector2;
-    life_timer: float = 1;
+    life_timer: float = 4;
+    friendly: bool = true; // fired by player
+
+    extents.x = BULLET_SIZE;
+    extents.y = BULLET_SIZE;
+}
+
+Actor :: struct {
+    using aabb: AABB;
+
+    look_direction: Vector2;
+    hurt_cooldown: float;
+}
+
+Enemy_State :: enum {
+    WAITING;
+    CHASING_PLAYER;
+    FIRING;
+    SPAWNING;
+}
+
+Enemy :: struct {
+    using actor: Actor;
+
+    extents.x = 0.5;
+    extents.y = 0.5;
+
+    state: Enemy_State;
+    timer: float;
+
+    shoot_cooldown: float;
+    shoot_angle: float;
+}
+
+Player :: struct {
+    using actor: Actor;
 }
 
 Occupant :: enum {
@@ -54,6 +116,7 @@ HIGH_SHADOW_MAP_SIZE   :: 2048;
 game: struct {
     pool: Pool.Pool;
     FPS := 0;
+    rendered_frame_count:s64 = 0;
     fps_time := 0.0;
     gamepad_time := 0.0;
     last_time: float64;
@@ -73,7 +136,9 @@ game: struct {
     sound_player: *Sound_Player;
     ambience: *Mixer_Sound_Data;
     eat_sound: *Mixer_Sound_Data;
+    arrow_sound: *Mixer_Sound_Data;
     hit_wall_sound: *Mixer_Sound_Data;
+    hurt_sound: *Mixer_Sound_Data;
     window_width: s32;
     window_height: s32;
 
@@ -100,12 +165,12 @@ game: struct {
     right_pressed := false;
     enter_pressed := false;
 
+    // input states
     firing_in_direction: [4]bool;
-    moving_in_direction: [4]bool;
-    fire_time_cooldown: float64;
+    input_direction: [4]bool;
+    fire_time_cooldown: float;
 
     player_has_crashed := false;
-    apple_count := 0;
 
     snake_move_percent := 0.0;
     snake_move_step := 4.0;
@@ -135,16 +200,9 @@ game: struct {
         y: int;
     }; // coords into grid where snake parts are, index := x + y * current(grid_size); 0th = head, count-1 = tail
 
-    player: struct {
-        pos: Vector2;
-    };
+    player: Player;
     bullets: [..]Bullet;
-
-    // the state of the current apple on screen
-    apple_anim_percent := 0.0;
-    apple_anim_step := 0.5;
-    apple_rotation := 0.0;
-    apple_rotation_step := 0.4;
+    enemies: [..]Enemy;
 
     // birds animation state
     bird_models: [3] *Model;
@@ -348,7 +406,6 @@ render_game :: () {
     // Hmm.. I'm not sure what an appropriate amount of floor tiles to render are without just going nuts
     // otherwise the camera may see empty space instead of floor!
     grid_size := cast(s32) game.grid_size;
-    
 
     {
         model := game.generic_floor_tile;
@@ -378,7 +435,7 @@ render_game :: () {
         glEnable(GL_DEPTH_TEST);
     }
 
-    bias := 0.5;
+    bias :: 0.5;
 
     {
         model := game.wall;
@@ -425,179 +482,33 @@ render_game :: () {
     }
     } // RENDER_TREES
 
-    for y: 0..game.grid_size-1 {
-        for x: 0..game.grid_size-1 {
-            oc := game.grid[x + y * game.grid_size];
-            
-            hover := sin(game.apple_rotation * 8) * 0.1;
-            translation := make_translation_matrix4(make_vector3(x + game.grid_offset_x + bias, 0 + hover, y + game.grid_offset_y + bias));
-            model: *Model;
-            if oc == {
-                case Occupant.APPLE_1;
-                    model = game.fruit;
-                    model.meshes[0].material.diffuse = make_vector3(1.0, 0.0, 0.0);    
-                case Occupant.APPLE_2;
-                    model = game.fruit;
-                    model.meshes[0].material.diffuse = make_vector3(1.0, 1.0, 1.0);
-                case Occupant.APPLE_3;
-                    model = game.fruit;
-                    model.meshes[0].material.diffuse = make_vector3(1.0, 1.0, 1.0);
-                case Occupant.ROCK;
-                case Occupant.EMPTY;
-                
-                // @Cleanup these are for debuggability
-                case Occupant.HEAD;
-                case Occupant.BODY;
-                case; assert(false);
-            }
-            if (!model) continue;
+    actor_model_matrix :: (using actor: *Actor) -> Matrix4 {
+        translation := make_translation_matrix4(make_vector3(pos.x + game.grid_offset_x + bias, bias, pos.y + game.grid_offset_y + bias));
 
-            scale_val := ease_out_elastic(game.apple_anim_percent);
-            scale := make_scale_matrix(scale_val, scale_val, scale_val);
-            q: Quaternion;
-            set_from_axis_and_angle(*q, 0.0, 1.0, 0.0, game.apple_rotation);
-            rot := make_rotation_matrix4(q);
-            
-            model.meshes[0].model_matrix = translation * rot * scale;
-            defer model.meshes[0].model_matrix = matrix4_identity();
-            
-            for model.meshes render_mesh(it);
-
-            {
-                model = game.fruit_leaf;
-                model.meshes[0].model_matrix = translation * rot * scale;
-                defer model.meshes[0].model_matrix = matrix4_identity();
-                
-                for model.meshes render_mesh(it);
-
-            }
-        }
-    }
-
-    if false {
-    for game.snake {
-        x := it.x;
-        y := it.y;
-        
-        translation := make_translation_matrix4(make_vector3(x + game.grid_offset_x + bias, bias, y + game.grid_offset_y + bias));
-        model: *Model;
-        rot := matrix4_identity();
-        if it_index == 0 {
-            model = game.snake_head;
-            if game.snake_failed_on_turn model = game.snake_head_mid;
-            next := game.snake[it_index+1];
-            if next.x == x+1 {
-                rot = make_rotation_matrix(0.0);
-            } else if next.x == x-1 {
-                rot = make_rotation_matrix(180.0);
-            } else if next.y == y+1 {
-                rot = make_rotation_matrix(270.0);
-            } else {
-                rot = make_rotation_matrix(90.0);
-            }
-        } else if it_index < game.snake.count-1 {
-            TYPE :: type_of(game.snake[0]);
-            get_occupant :: (x: int, y: int, p0: TYPE, p1: TYPE) -> Occupant {
-                if x < 0 || x >= game.grid_size return Occupant.EMPTY;
-                if y < 0 || y >= game.grid_size return Occupant.EMPTY;
-                if x == p0.x && y == p0.y return game.grid[x + y * game.grid_size];
-                if x == p1.x && y == p1.y return game.grid[x + y * game.grid_size];
-                return Occupant.EMPTY;
-            }
-            cur := game.snake[it_index];
-            prev := game.snake[it_index-1];
-            next := game.snake[it_index+1];
-            up := get_occupant(cur.x, cur.y-1, prev, next);
-            down := get_occupant(cur.x, cur.y+1, prev, next);
-            left := get_occupant(cur.x-1, cur.y, prev, next);
-            right := get_occupant(cur.x+1, cur.y, prev, next);
-            
-            if up && down {
-                model = game.snake_body_straight;
-                rot = make_rotation_matrix(90.0);
-            } else if left && right {
-                model = game.snake_body_straight;
-                rot = make_rotation_matrix(0);
-            } else {
-                model = game.snake_body_angle;
-                if up && right {
-                    rot = make_rotation_matrix(270.0);
-                } else if right && down {
-                    rot = make_rotation_matrix(180.0);
-                } else if down && left {
-                    rot = make_rotation_matrix(90.0);
-                } else if left && up {
-                    rot = make_rotation_matrix(0.0);
-                } else {
-                    assert(false);
-                }
-            }
-        } else if it_index == game.snake.count-1 {
-            model = game.snake_tail;
-            prev := game.snake[it_index-1];
-            if prev.x == x+1 {
-                rot = make_rotation_matrix(180.0);
-            } else if prev.x == x-1 {
-                rot = make_rotation_matrix(0.0);
-            } else if prev.y == y+1 {
-                rot = make_rotation_matrix(90.0);
-            } else {
-                rot = make_rotation_matrix(270.0);
-            }
-        }
-        
-        sx := 1.0;
-        if model == game.snake_head_mid {
-            sx = game.snake_head_x_scale;
-            if sx < 0 then rot *= make_rotation_matrix(180.0);
-        }
-        scale := make_scale_matrix(sx, 1, 1);
-        model.meshes[0].model_matrix = translation * rot * scale;
-        defer model.meshes[0].model_matrix = matrix4_identity();
-        
-        for model.meshes render_mesh(it);
-    }
-    } // if false
-
-
-    if game.player_has_crashed {        
-        coords := game.snake[0];
-        x := coords.x;
-        y := coords.y;
-
-        bird_frame := cast(s32) (game.bird_anim_percent * game.bird_models.count);
-
-        translation := make_translation_matrix4(make_vector3(x + game.grid_offset_x + bias, bias, y + game.grid_offset_y + bias));
-        model := game.bird_models[bird_frame];
         q: Quaternion;
-        set_from_axis_and_angle(*q, 0.0, 1.0, 0.0, game.bird_rotation);
+        set_from_axis_and_angle(*q, 0, 1, 0, TAU * .25 + angle_radians_vec2(look_direction));
         rot := make_rotation_matrix4(q);
 
-        set_from_axis_and_angle(*q, 0.0, 1.0, 0.0, PI / 2);
-        body_rot := make_rotation_matrix4(q);
-
-        offset := make_translation_matrix4(make_vector3(0.25, 0, 0));
-
-        model.meshes[0].model_matrix = translation * rot * offset * body_rot;
-        defer model.meshes[0].model_matrix = matrix4_identity();
-        
-        for model.meshes render_mesh(it);
-
-        // render the second bird
-        set_from_axis_and_angle(*q, 0.0, 1.0, 0.0, game.bird_rotation + (TAU / 2));
-        rot = make_rotation_matrix4(q);
-        model.meshes[0].model_matrix = translation * rot * offset * body_rot;
-        for model.meshes render_mesh(it);
+        return translation * rot;
     }
 
     // render player
+    if game.player.hurt_cooldown <= 0 || (game.rendered_frame_count & 1)
     {
         model := game.snake_head;
-        translation := make_translation_matrix4(make_vector3(
-            game.player.pos.x + game.grid_offset_x + bias, bias, game.player.pos.y + game.grid_offset_y + bias));
-        model.meshes[0].model_matrix = translation;
+        model.meshes[0].model_matrix = actor_model_matrix(*game.player);
         defer model.meshes[0].model_matrix = matrix4_identity();
         for model.meshes render_mesh(it);
+    }
+
+    // render enemies
+    for * game.enemies {
+        if it.state != Enemy_State.SPAWNING || (game.rendered_frame_count & 1) {
+            model := game.snake_head;
+            model.meshes[0].model_matrix = actor_model_matrix(it);
+            defer model.meshes[0].model_matrix = matrix4_identity();
+            for model.meshes render_mesh(it);
+        }
     }
 
     // render bullets
@@ -628,7 +539,7 @@ render_game :: () {
 
         APPLE_TEXT :: "Points: ";
         {
-            text := tprint("%1%2", APPLE_TEXT, game.apple_count);
+            text := tprint("%1%2", APPLE_TEXT, 0);
             color := white;
             offset := 0;
             draw_text(game.font, color, offset, base, text);
@@ -703,7 +614,6 @@ render_light_shadowmap :: (using light: *Light) {
 }
 
 render_menu :: () {
-
     proj := game.projection;
     defer game.projection = proj;
     view := game.view;
@@ -748,9 +658,7 @@ render_menu :: () {
 }
 
 render :: () {
-    for game.lights {
-        render_light_shadowmap(it);
-    }
+    for game.lights render_light_shadowmap(it);
 
     if game.msaa glEnable(GL_MULTISAMPLE);
     defer if game.msaa glDisable(GL_MULTISAMPLE);
@@ -783,6 +691,21 @@ render :: () {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 }
 
+damage_player :: () {
+    play_sound(game.hurt_sound, true);
+    game.screen_shake_percent = 0.42;
+    game.player.hurt_cooldown = PLAYER_HURT_COOLDOWN;
+}
+
+move_actor :: (using actor: *Actor, delta: Vector2) {
+    pos += delta;
+    if delta.x != 0 || delta.y != 0 {
+        dir := delta;
+        normalize_vec2(*dir);
+        look_direction = dir;
+    }
+}
+
 update_game :: (dt: float) {
     using game;
 
@@ -795,138 +718,137 @@ update_game :: (dt: float) {
     turned := false;
     turned_right := true;
 
-    delta : Vector2;
-    for vec, idx: direction_vectors
-        if moving_in_direction[idx]
+    // update player
+    {
+        delta : Vector2;
+        for vec, idx: direction_vectors if input_direction[idx]
             delta += vec;
-    normalize_vec2(*delta);
-    PLAYER_SPEED :: 9.0;
-    player.pos += delta * PLAYER_SPEED * dt;
+        normalize_vec2(*delta);
 
-    if up_pressed {
-        if game.snake_dir_y == 0 && game.can_move {
-            turned = true;
-            turned_right = game.snake_dir_x == -1;
+        move_actor(*player, delta * PLAYER_SPEED * dt);
 
-            game.snake_dir_x = 0;
-            game.snake_dir_y = -1;
-
-            game.can_move = false; // lock the can_move flag until the snake moves again
-        }
-    }
-
-    if down_pressed {
-        if game.snake_dir_y == 0 && game.can_move {
-            turned = true;
-            turned_right = game.snake_dir_x == 1;
-
-            game.snake_dir_x = 0;
-            game.snake_dir_y = 1;
-
-            game.can_move = false; // lock the can_move flag until the snake moves again
-        }
-    }
-
-    if left_pressed {
-        if game.snake_dir_x == 0 && game.can_move {
-            turned = true;
-            turned_right = game.snake_dir_y == 1; // going down
-
-            game.snake_dir_x = -1;
-            game.snake_dir_y = 0;
-
-            game.can_move = false; // lock the can_move flag until the snake moves again
-        }
-    }
-
-    if right_pressed {
-        if game.snake_dir_x == 0 && game.can_move {
-            turned = true;
-            turned_right = game.snake_dir_y == -1; // going up
-
-            game.snake_dir_x = 1;
-            game.snake_dir_y = 0;
-
-            game.can_move = false; // lock the can_move flag until the snake moves again
-        }
-    }
-
-    // update bullets
-    for * bullets {
-        it.life_timer -= dt;
-        if it.life_timer <= 0 {
-            remove it;
-            continue;
+        if timer_done(dt, *player.hurt_cooldown) {
+            for * enemies {
+                if overlaps(it, *player) {
+                    damage_player();
+                    break;
+                }
+            }
         }
 
-        it.pos += it.vel * dt;
-        if it.pos.x < 0 {
-            remove it;
-            continue;
-        }
-        if it.pos.y < 0 {
-            remove it;
-            continue;
-        }
-    }
+        if player.hurt_cooldown <= 0 && timer_done(dt, *fire_time_cooldown) {
+            fire_vector: Vector2;
+            for vec, idx: direction_vectors if firing_in_direction[idx]
+                fire_vector += vec;
 
-    fire_vector: Vector2;
-    for vec, idx: direction_vectors 
-        if firing_in_direction[idx] fire_vector += vec;
+            if is_nonzero(fire_vector) {
+                normalize_vec2(*fire_vector);
+                fire_time_cooldown = PLAYER_FIRE_RATE;
+                play_sound(game.arrow_sound, perturb=true, volume=0.2);
 
-    fire_time_cooldown -= dt;
-    if length_squared_vec2(fire_vector) > 0.001 && fire_time_cooldown <= 0 {
-        normalize_vec2(*fire_vector);
-        fire_time_cooldown = 0.1;
-
-        BULLET_SPEED :: 15.0;
-        using bullet: Bullet;
-        pos = player.pos;
-        vel = fire_vector * BULLET_SPEED;
-        array_add(*bullets, bullet);
-    }
-
-    if apple_anim_percent < 1.0 {
-        apple_anim_percent += (apple_anim_step * dt);
-        if apple_anim_percent > 1.0 apple_anim_percent = 1.0;
-    }
-
-    apple_rotation += apple_rotation_step * dt;
-    while apple_rotation > TAU apple_rotation -= TAU;
-
-    bird_anim_percent += bird_anim_step * dt;
-    if bird_anim_percent > 1.0 {
-        bird_anim_percent = 0.9999;
-        bird_anim_step = -bird_anim_step;
-    }
-
-    if bird_anim_percent < 0 {
-        bird_anim_percent = 0;
-        bird_anim_step = -bird_anim_step;
-    }
-
-    bird_rotation += bird_rotation_step * dt;
-    while bird_rotation > TAU bird_rotation -= TAU;
-
-    snake_move_percent += (snake_move_step * dt);
-    if turned snake_move_percent = 1.0;
-
-    while false && snake_move_percent >= 1.0 && !game.player_has_crashed {
-        snake_move_percent -= 1.0;
-        has_not_died, has_hit_wall := move_snake(snake_dir_x, snake_dir_y);
-        if !has_not_died {
-            game.player_has_crashed = true;
-            play_sound(game.hit_wall_sound, true);
-            screen_shake_percent = 0;
-            if has_hit_wall shake_amount = 0.3;
-            else shake_amount = 0.1;
-            if turned {
-                snake_failed_on_turn = true;
-                if turned_right snake_head_x_scale = 1.0;
-                else snake_head_x_scale = -1.0;
+                using bullet: Bullet;
+                pos = player.pos;
+                vel = fire_vector * PLAYER_BULLET_SPEED;
+                array_add(*bullets, bullet);
             }
         }
     }
+
+    determine_next_state :: inline (using enemy: *Enemy) {
+        using Enemy_State;
+
+        roll := rand_01();
+        if #complete state == {
+            case SPAWNING;
+                if roll < .5 state = FIRING;
+                else state = CHASING_PLAYER;
+            case CHASING_PLAYER;
+                if roll < .3 state = FIRING;
+                else state = WAITING;
+            case WAITING;
+                if roll < .3 state = FIRING;
+                else state = CHASING_PLAYER;
+            case FIRING;
+                if roll < .3 state = CHASING_PLAYER;
+                else state = WAITING;
+        }
+    }
+
+    advance_to_next_state :: inline (using enemy: *Enemy) {
+        using Enemy_State;
+
+        determine_next_state(enemy);
+        if state == {
+            case SPAWNING;
+                timer = rand_range(1, 1.2);
+            case CHASING_PLAYER;
+                timer = rand_range(1, 3);
+            case WAITING;
+                timer = rand_range(2, 4);
+            case FIRING;
+                timer = rand_range(3, 4);
+                shoot_angle = rand_01() * TAU;
+        }
+    }
+
+    // update enemies
+    for * enemies {
+        using it;
+        if timer_done(dt, *timer) {
+            advance_to_next_state(it);
+            continue;
+        }
+
+        using Enemy_State;
+        if #complete state == {
+            case WAITING;
+            case SPAWNING;
+            case FIRING;
+                shoot_angle += ENEMY_SHOOT_ANGLE_SPEED * dt;
+                fire_vector := unit_vector(make_vector3(cos(shoot_angle), sin(shoot_angle), 0));
+                look_direction = fire_vector.xy;
+                if timer_done(dt, *shoot_cooldown, ENEMY_FIRE_RATE) {
+                    bullet: Bullet;
+                    bullet.pos = pos;
+                    bullet.vel = fire_vector.xy * ENEMY_BULLET_SPEED;
+                    bullet.friendly = false;
+                    array_add(*bullets, bullet);
+                }
+            case CHASING_PLAYER;
+                to_player := game.player.pos - pos;
+                normalize_vec2(*to_player);
+                move_actor(it, ENEMY_MOVE_SPEED * to_player * dt);
+        }
+
+    }
+
+    // update bullets
+    for *bullet: bullets {
+        bullet.life_timer -= dt;
+        if bullet.life_timer <= 0 {
+            remove bullet;
+            continue;
+        }
+
+        bullet.pos += bullet.vel * dt;
+
+        if bullet.friendly {
+            for *enemy: enemies {
+                if overlaps(bullet, enemy) {
+                    remove enemy;
+                    play_sound(game.hit_wall_sound, true);
+                    game.screen_shake_percent = 0.85;
+                    remove bullet;
+                }
+            }
+        } else {
+            if overlaps(bullet, *player) {
+                damage_player();
+                remove bullet;
+            }
+        }
+    }
+
 }
 
 update_menu :: (dt: float) {
@@ -965,18 +887,6 @@ update :: (dt: float) {
     if screen_shake_percent < 1.0 {
         screen_shake_percent += (screen_shake_step * dt);
         if screen_shake_percent > 1.0 screen_shake_percent = 1.0;
-    }
-}
-
-generate_apple :: () {
-    while true {
-        pos := random_get() % game.grid.count;
-        if (game.grid[pos] == Occupant.EMPTY) {
-            game.grid[pos] = Occupant.APPLE_1;
-            game.apple_anim_percent = 0;
-            game.apple_rotation = 0;
-            return;
-        }
     }
 }
 
@@ -1049,15 +959,10 @@ move_snake :: (x: int, y: int) -> has_not_died: bool, has_hit_wall: bool {
     
     game.snake[0] = target;
     
-    if new_apple {
-        play_sound(game.eat_sound, false);
-        game.apple_count += 1;
-        generate_apple();
-    }
     return true, false; // is valid move
 }
 
-play_sound :: (data: *Mixer_Sound_Data, perturb: bool = true) -> *Sound_Stream {
+play_sound :: (data: *Mixer_Sound_Data, perturb: bool = true, volume := 0.7) -> *Sound_Stream {
     stream := make_stream(game.sound_player, data);
     assert(stream != null);
 
@@ -1065,11 +970,11 @@ play_sound :: (data: *Mixer_Sound_Data, perturb: bool = true) -> *Sound_Stream {
         stream.sound_data = data;
         num_source_samples: s64 = data.nsamples_times_nchannels / data.nchannels;
         stream.repeat_end_position = num_source_samples;
-        stream.user_volume_scale = 0.7;
+        stream.user_volume_scale = volume;
     }
 
     if perturb && stream {
-        stream.user_volume_scale = random_get_within_range(0.7, 1.0);
+        stream.user_volume_scale = random_get_within_range(volume, volume + 0.2);
         stream.desired_rate = random_get_within_range(0.7, 1.22);
     }
     
@@ -1078,6 +983,28 @@ play_sound :: (data: *Mixer_Sound_Data, perturb: bool = true) -> *Sound_Stream {
 
 
 reset_game :: () {
+    {
+        using game.player;
+        pos = make_vector2(0, 0);
+    }
+
+    // setup enemies
+    {
+        array_reset(*game.enemies);
+
+        for 0..4 {
+            enemy: Enemy;
+            enemy.pos.x = random_get_within_range(0, 10);
+            enemy.pos.y = random_get_within_range(0, 10);
+
+            enemy.state = Enemy_State.SPAWNING;
+            enemy.timer = random_get_within_range(1.0, 2.0);
+
+            array_add(*game.enemies, enemy);
+        }
+    }
+    
+
     game.grid_size = INITIAL_GRID_SIZE;
     array_reset(*game.grid);
     array_resize(*game.grid, game.grid_size * game.grid_size);
@@ -1102,8 +1029,6 @@ reset_game :: () {
         array_add(*game.snake, p);
     }
     
-    generate_apple();
-
     game.mode = game.mode.GAME;
 
     game.down_pressed = false;
@@ -1116,7 +1041,6 @@ reset_game :: () {
 
     game.player_has_crashed = false;
     game.snake_move_percent = 0;
-    game.apple_count = 0;
     game.screen_shake_percent = 1;
     game.snake_failed_on_turn = false;
     game.snake_head_x_scale = 1;
@@ -1225,8 +1149,10 @@ init_game :: () {
 }
 
 load_resources :: () {
+    game.arrow_sound = load_audio_file("data/arrow.ogg");
     game.eat_sound = load_audio_file("data/eat_01.ogg");
     game.hit_wall_sound = load_audio_file("data/Jump_1.ogg");
+    game.hurt_sound = load_audio_file("data/hurt.ogg");
 
     game.ambience = load_audio_file("data/Forest_Ambience.ogg");
 
@@ -1280,7 +1206,6 @@ load_resources :: () {
     buffer_model(game.wall);
     for game.tree buffer_model(it);
     buffer_model(game.generic_floor_tile);
-    
 }
 
 fini_game :: () {
@@ -1316,6 +1241,7 @@ do_frame :: (window: Window_Type) -> did_render_frame: bool {
     game.grid_offset_x = -(cast(float) game.grid_size / 2);
     game.grid_offset_y = -(cast(float) game.grid_size / 2);
 
+
     for events_this_frame {
         if it.type == {
             case Event_Type.QUIT;
@@ -1326,10 +1252,12 @@ do_frame :: (window: Window_Type) -> did_render_frame: bool {
                     case Key_Code.F8;
                         do_screenshot();
 
-                    case cast(Key_Code)(#char "W"); game.moving_in_direction[Direction.UP]    = key_down;
-                    case cast(Key_Code)(#char "A"); game.moving_in_direction[Direction.LEFT]  = key_down;
-                    case cast(Key_Code)(#char "S"); game.moving_in_direction[Direction.DOWN]  = key_down;
-                    case cast(Key_Code)(#char "D"); game.moving_in_direction[Direction.RIGHT] = key_down;
+                    case cast(Key_Code)(#char "R"); if key_down reset_game();
+
+                    case cast(Key_Code)(#char "W"); game.input_direction[Direction.UP]    = key_down;
+                    case cast(Key_Code)(#char "A"); game.input_direction[Direction.LEFT]  = key_down;
+                    case cast(Key_Code)(#char "S"); game.input_direction[Direction.DOWN]  = key_down;
+                    case cast(Key_Code)(#char "D"); game.input_direction[Direction.RIGHT] = key_down;
 
                     case cast(Key_Code)(#char "I"); game.firing_in_direction[Direction.UP]    = key_down;
                     case cast(Key_Code)(#char "J"); game.firing_in_direction[Direction.LEFT]  = key_down;
@@ -1431,6 +1359,7 @@ do_frame :: (window: Window_Type) -> did_render_frame: bool {
     
     if need_to_render {
         game.FPS += 1;
+        game.rendered_frame_count += 1;
         render();
     }
 
@@ -1461,7 +1390,7 @@ main :: () {
     direction_vectors[Direction.LEFT]  = make_vector2(-1, 0);
     direction_vectors[Direction.RIGHT] = make_vector2(1, 0);
 
-    window := create_window(1280, 720, GAME_NAME);
+    window := create_window(1600, 900, GAME_NAME);
     window_handle = xx window;
     gl_create_context(window, 3, 2);
     gl_load(*gl);
@@ -1484,10 +1413,10 @@ main :: () {
     // assert(success);
 
     load_resources();
-    
+
     stream := play_sound(game.ambience, false);
     stream.flags |= stream.REPEATING;
-    stream.user_volume_scale = 1.0;
+    stream.user_volume_scale = 0.8;
     
     game.view = matrix4_identity();
     
