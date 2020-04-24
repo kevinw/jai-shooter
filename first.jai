@@ -15,7 +15,7 @@
     Bundler :: #import "MacOS_Bundler";
 }
 
-GAME_NAME :: "Jaitron";
+GAME_NAME :: "Shooter";
 
 BUILD_COCOA_APP :: true;
 

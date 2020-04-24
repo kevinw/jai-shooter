@@ -68,10 +68,12 @@ Enemy :: struct {
     shoot_angle: float;
 }
 
+STARTING_HEALTH :: 3;
+
 Player :: struct {
     using actor: Actor;
 
-    health := 3;
+    health := STARTING_HEALTH;
 
     walk_rotate: float;
     walk_dir: s8 = 1;
@@ -1018,6 +1020,7 @@ reset_game :: () {
         pos = make_vector2(PLAY_AREA_SIZE / 2, PLAY_AREA_SIZE / 2);
         extents.x = game.settings.player.size;
         extents.y = game.settings.player.size;
+        health = STARTING_HEALTH;
     }
 
     // setup enemies
