@@ -16,6 +16,7 @@ Pool :: #import "Pool";
 #load "render.jai";
 #load "obj_loader.jai";
 #load "util.jai";
+#load "physics.jai";
 
 #if OS_WINDOWS {
     DEBUG_UI :: true; 
@@ -35,17 +36,6 @@ Pool :: #import "Pool";
 
 Direction :: enum { UP; DOWN; LEFT; RIGHT; }
 direction_vectors: [4]Vector2;
-
-AABB :: struct {
-    pos: Vector2;
-    extents: Vector2;
-}
-
-overlaps :: (a: *AABB, b: *AABB) -> bool {
-    t := b.pos - a.pos;
-    return abs(t.x) <= (a.extents.x + b.extents.x) &&
-        abs(t.y) <= (a.extents.y + b.extents.y);
-}
 
 Bullet :: struct {
     using aabb: AABB;
@@ -80,6 +70,9 @@ Enemy :: struct {
 
 Player :: struct {
     using actor: Actor;
+
+    extents.x = game.settings.player.size;
+    extents.y = game.settings.player.size;
 }
 
 Occupant :: enum {
@@ -99,7 +92,7 @@ Menu_Selection :: enum s8 {
 };
 Menu_Selection_MAX :: 2;
 
-FONT_HEIGHT :: 40;
+FONT_HEIGHT :: 32;
 
 LOW_SHADOW_MAP_SIZE    :: 512;
 MEDIUM_SHADOW_MAP_SIZE :: 1024;
@@ -108,19 +101,23 @@ HIGH_SHADOW_MAP_SIZE   :: 2048;
 INITIAL_GRID_SIZE :: 11;
 
 game: struct {
+    static: [..]AABB;
+
     settings: struct {
         enemy: struct {
             size := 0.45;
             fire_rate := 0.3;
-            move_speed := 3.5;
+            move_speed := 3.2;
             bullet_speed := 5.0;
-            shoot_angle_speed := TAU * .8;
+            shoot_angle_speed := 1.05;
             spawn_delay_min := 0.6;
             spawn_delay_max := 2.3;
             max_count := 6;
             spawn_at_a_time := 2.0;
+            initial_spawn_count := 0; // 5;
         };
         player: struct {
+            size := 0.3;
             speed := 9.0;
             hurt_cooldown := 1.0;
             hurt_screenshake := 0.42;
@@ -128,7 +125,8 @@ game: struct {
             fire_rate := 0.15;
             move_speed_add_to_bullet := 3.0;
         };
-        bullet_size := 0.25;
+        bullet_size := 0.05;
+        visual_bullet_size := 0.5;
         camera: struct {
             pos: Vector3;
             pos.x = 0;
@@ -146,6 +144,10 @@ game: struct {
             direction.y = -0.8;
             direction.z = -1;
         };
+    };
+
+    stats: struct {
+        num_enemies_defeated: u32;
     };
 
     time_scale := 1.0;
@@ -223,9 +225,6 @@ game: struct {
     bullets: [..]Bullet;
     enemies: [..]Enemy;
     enemy_spawn_cooldown: float;
-
-    // birds animation state
-    //bird_models: [3] *Model;
 
     screen_shake_percent := 1.0;
     screen_shake_step := 2.1;
@@ -428,7 +427,7 @@ render_game :: () {
         }
     }
 
-    DRAW_GRID :: true;
+    DRAW_GRID :: false;
     if DRAW_GRID {
         glDisable(GL_DEPTH_TEST);
         // draw grid
@@ -526,45 +525,65 @@ render_game :: () {
         model.meshes[0].material.diffuse = make_vector3(1.0, 0.0, 0.0);
         for * game.bullets {
             translation := make_translation_matrix4(make_vector3(it.pos.x + game.grid_offset_x + bias, bias, it.pos.y + game.grid_offset_y + bias));
-            scale_val := game.settings.bullet_size * 2;
+            scale_val := game.settings.visual_bullet_size;
             model.meshes[0].model_matrix = translation * make_scale_matrix(scale_val, scale_val, scale_val);
             defer model.meshes[0].model_matrix = matrix4_identity();
             for model.meshes render_mesh(it);
         }
     }
 
+    // render debug AABB
+    {
+        glDisable(GL_DEPTH_TEST);
+        defer glEnable(GL_DEPTH_TEST);
+
+        render_aabb :: inline (it: *AABB) {
+            p1 := it.pos - it.extents;
+            p2 := it.pos + it.extents;
+            color := make_vector4(1.0, 1.0, 1.0, 1.0);
+
+            w := it.extents.x * 2;
+            h := it.extents.y * 2;
+
+            draw_line(make_Quad(p1.x + game.grid_offset_x, p1.y + game.grid_offset_y, w, 0), color);
+            draw_line(make_Quad(p1.x + game.grid_offset_x, p2.y + game.grid_offset_y, w, 0), color);
+
+            draw_line(make_Quad(p1.x + game.grid_offset_x, p1.y + game.grid_offset_y, 0, h), color);
+            draw_line(make_Quad(p2.x + game.grid_offset_x, p1.y + game.grid_offset_y, 0, h), color);
+        }
+
+        using game;
+        for * static render_aabb(it);
+        for * bullets render_aabb(it);
+        for * enemies render_aabb(it);
+        render_aabb(*player);
+    }
+
+    // UI
+
     glDisable(GL_DEPTH_TEST);
     proj := game.projection;
     defer game.projection = proj;
 
     game.view = matrix4_identity();
-
     game.projection = orthographic_projection_matrix(0, cast(float) game.window_width, 0, cast(float) game.window_height, -1, 1);
 
+    white := make_vector4(1, 1, 1, 1);
+
     {
-        white := make_vector4(1, 1, 1, 1);
-
         base := game.window_height - FONT_HEIGHT;
-
-        APPLE_TEXT :: "Points: ";
-        {
-            text := tprint("%1%2", APPLE_TEXT, 0);
-            color := white;
-            offset := 0;
-            draw_text(game.font, color, offset, base, text);
-        }
+        text := tprint("%1%2", "Defeated: ", game.stats.num_enemies_defeated);
+        color := white;
+        offset := 0;
+        draw_text(game.font, color, offset, base, text);
     }
 
     {
-        white := make_vector4(1, 1, 1, 1);
-
         base := game.window_height - FONT_HEIGHT;
-        {
-            text := game.fps_string;
-            color := white;
-            offset := game.window_width - 300;
-            draw_text(game.font, color, offset, base, text);
-        }
+        text := game.fps_string;
+        color := white;
+        offset := game.window_width - 300;
+        draw_text(game.font, color, offset, base, text);
     }
 
     if game.player_has_crashed {
@@ -713,7 +732,7 @@ damage_player :: () {
 
 move_actor :: (using actor: *Actor, delta: Vector2) {
     if delta.x != 0 || delta.y != 0 {
-        pos += delta;
+        try_move(actor, delta, game.static);
 
         dir := delta;
         normalize_vec2(*dir);
@@ -799,7 +818,7 @@ update_game :: (dt: float) {
             case SPAWNING;
                 timer = random_get_within_range(1, 1.2);
             case CHASING_PLAYER;
-                timer = random_get_within_range(1, 3);
+                timer = 0; // random_get_within_range(1, 3);
             case WAITING;
                 timer = random_get_within_range(2, 4);
             case FIRING;
@@ -848,20 +867,24 @@ update_game :: (dt: float) {
         }
     }
 
-    // update bullets
+    // kill old bullets
     for *bullet: bullets {
         bullet.life_timer -= dt;
         if bullet.life_timer <= 0 {
             remove bullet;
             continue;
         }
+    }
 
+    // update bullets
+    for *bullet: bullets {
         bullet.pos += bullet.vel * dt;
 
         if bullet.friendly {
             for *enemy: enemies {
                 if enemy.state != Enemy_State.SPAWNING && overlaps(bullet, enemy) {
                     remove enemy;
+                    game.stats.num_enemies_defeated += 1;
                     play_sound(game.hit_wall_sound, true);
                     game.screen_shake_percent = 0.85;
                     remove bullet;
@@ -872,10 +895,15 @@ update_game :: (dt: float) {
             if overlaps(bullet, *player) {
                 damage_player();
                 remove bullet;
+                continue;
             }
         }
-    }
 
+        for * static if overlaps(bullet, it) {
+            remove bullet;
+            break;
+        }
+    }
 }
 
 update_menu :: (dt: float) {
@@ -961,9 +989,29 @@ reset_game :: () {
     // setup enemies
     {
         array_reset(*game.enemies);
-        for 0..4 {
+        for 0..game.settings.enemy.initial_spawn_count-1 {
             spawn_new_enemy();
         }
+    }
+
+    // setup collision
+    {
+        array_reset(*game.static);
+
+        make_static_collider :: (x: float, y: float, extents_x: float, extents_y: float) -> AABB {
+            box: AABB;
+            box.pos = make_vector2(x, y);
+            box.extents = make_vector2(extents_x, extents_y);
+            return box;
+        }
+        
+        half_grid_size := cast(float)INITIAL_GRID_SIZE * .5;
+
+        // add colliders for the walls
+        array_add(*game.static, make_static_collider(-1, half_grid_size, 1, half_grid_size + 2));
+        array_add(*game.static, make_static_collider(half_grid_size, -1, half_grid_size + 2, 1));
+        array_add(*game.static, make_static_collider(INITIAL_GRID_SIZE, half_grid_size, 1, half_grid_size + 2));
+        array_add(*game.static, make_static_collider(half_grid_size, INITIAL_GRID_SIZE, half_grid_size + 2, 1));
     }
 
     game.grid_size = INITIAL_GRID_SIZE;
