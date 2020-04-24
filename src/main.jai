@@ -1390,9 +1390,6 @@ show_inspector: bool;
 new_imgui_frame :: (window: *void) {
     ImGui_Impl_NewFrame(window, game.window_width, game.window_height);
     if show_inspector {
-        if ImGui.Button("Print", size=*make_vector2(0, 0)) {
-            print("%", game.settings);
-        }
         inspect("settings", *game.settings);
     }
 }
