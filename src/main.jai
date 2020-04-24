@@ -17,6 +17,16 @@ Pool :: #import "Pool";
 #load "obj_loader.jai";
 #load "util.jai";
 
+#if OS_WINDOWS {
+DEBUG_UI :: true; 
+} else {
+DEBUG_UI :: false; // TODO: implement some of the imgui input bits for non windows platforms (Input module doesn't have mouse move events)
+}
+
+#if DEBUG_UI {
+#load "imgui_inspector.jai";
+}
+
 #if OS_MACOSX {
     #load "macosx.jai"; // Cocoa app stuff/entry point
 }
@@ -486,21 +496,22 @@ render_game :: () {
     }
     } // RENDER_TREES
 
-    actor_model_matrix :: (using actor: *Actor) -> Matrix4 {
+    actor_model_matrix :: (using actor: *Actor, scale:float = 1) -> Matrix4 {
         translation := make_translation_matrix4(make_vector3(pos.x + game.grid_offset_x + bias, bias, pos.y + game.grid_offset_y + bias));
 
         q: Quaternion;
         set_from_axis_and_angle(*q, 0, 1, 0, TAU * .25 + angle_radians_vec2(look_direction));
+        scl: Matrix4 = matrix4_identity();
+        if scale != 1 scl = make_scale_matrix(scale, scale, scale);
         rot := make_rotation_matrix4(q);
 
-        return translation * rot;
+        return translation * scl * rot;
     }
 
     // render player
-    if game.player.hurt_cooldown <= 0 || (game.rendered_frame_count & 1)
-    {
+    if game.player.hurt_cooldown <= 0 || (game.rendered_frame_count & 1) {
         model := game.snake_head;
-        model.meshes[0].model_matrix = actor_model_matrix(*game.player);
+        model.meshes[0].model_matrix = actor_model_matrix(*game.player);//, .36);
         defer model.meshes[0].model_matrix = matrix4_identity();
         for model.meshes render_mesh(it);
     }
@@ -509,7 +520,7 @@ render_game :: () {
     for * game.enemies {
         if it.state != Enemy_State.SPAWNING || (game.rendered_frame_count & 1) {
             model := game.snake_head;
-            model.meshes[0].model_matrix = actor_model_matrix(it);
+            model.meshes[0].model_matrix = actor_model_matrix(it);//, .36);
             defer model.meshes[0].model_matrix = matrix4_identity();
             for model.meshes render_mesh(it);
         }
@@ -518,7 +529,7 @@ render_game :: () {
     // render bullets
     {
         model := game.fruit;
-        model.meshes[0].material.diffuse = make_vector3(1.0, 0.0, 0.0);    
+        model.meshes[0].material.diffuse = make_vector3(1.0, 0.0, 0.0);
         for * game.bullets {
             translation := make_translation_matrix4(make_vector3(it.pos.x + game.grid_offset_x + bias, bias, it.pos.y + game.grid_offset_y + bias));
             scale_val :: 0.5;
@@ -693,6 +704,8 @@ render :: () {
     glFlush();
 
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+    #if DEBUG_UI ImGui.Render();
 }
 
 damage_player :: () {
@@ -1186,6 +1199,7 @@ load_resources :: () {
     game.font, bytes_loaded = load_font("data", "KarminaBoldItalic.otf", FONT_HEIGHT);
 
     game.snake_head = load_obj("data/head.obj")[0];
+    //game.snake_head = load_obj("data/decimated.obj")[0];
     game.snake_head_mid = load_obj("data/head_mid.obj")[0];
     game.snake_body_straight = load_obj("data/body.obj")[0];
     game.snake_body_angle = load_obj("data/body_corner.obj")[0];
@@ -1254,8 +1268,9 @@ do_frame :: (window: Window_Type) -> did_render_frame: bool {
     game.grid_offset_x = -(cast(float) game.grid_size / 2);
     game.grid_offset_y = -(cast(float) game.grid_size / 2);
 
-
     for events_this_frame {
+        #if DEBUG_UI ImGui_Impl_ProcessEvent(it);
+
         if it.type == {
             case Event_Type.QUIT;
                 game.quit = true;
@@ -1343,6 +1358,8 @@ do_frame :: (window: Window_Type) -> did_render_frame: bool {
         }
     }
 
+    #if DEBUG_UI new_imgui_frame(window);
+
     dt: float;
     now := get_time();
     if game.last_time dt = cast(float) (now - game.last_time);
@@ -1364,6 +1381,7 @@ do_frame :: (window: Window_Type) -> did_render_frame: bool {
         game.left_pressed = false;
         game.right_pressed = false;
         game.enter_pressed = false;
+
     }
 
     pre_entity_update(game.sound_player);
@@ -1394,6 +1412,14 @@ do_frame :: (window: Window_Type) -> did_render_frame: bool {
     return need_to_render;
 }
 
+#if DEBUG_UI {
+show_inspector: bool;
+new_imgui_frame :: (window: *void) {
+    ImGui_Impl_NewFrame(window, game.window_width, game.window_height);
+    inspect("game", *game);
+}
+}
+
 // @Note see macosx.jai for the MacOSX entry point that uses Cocoa/AppKit's run loop.
 main :: () {
     init_game();
@@ -1414,6 +1440,13 @@ main :: () {
     } else if GL_ARB_debug_output {
         glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
         glDebugMessageCallbackARB(debug_callback, *context);
+    }
+
+
+    #if DEBUG_UI {
+        // setup ui
+        ImGui_Impl_Init(window);
+        ImGui.StyleColorsLight();
     }
 
     game.window_width = 1280;
