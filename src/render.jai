@@ -527,7 +527,7 @@ use_shader_and_update_matrices :: (shader: GLuint, model: Matrix4) {
         }
     }
 
-    position := game.camera_position;
+    position := game.settings.camera.pos;
     glUniform3f(uniloc(shader, "camera.position"), position.x, position.y, position.z);
     glUniform1i(uniloc(shader, "num_lights"), cast(s32) num_lights);
 }
