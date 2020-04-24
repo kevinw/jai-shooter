@@ -8,8 +8,8 @@ show_inspector := true;    // Wish we could declare static variables inside func
 
 #scope_export
 
-inspect :: (name: *u8, t : *$T) {
-    ImGui.SetNextWindowSize(*make_vector2(800, 1000));
+inspect :: (name: *u8, t : *$T, start_expanded := false) {
+    //ImGui.SetNextWindowSize(*make_vector2(800, 1000));
     ImGui.Begin(name, *show_inspector);
     inspect(name, t, type_info(T));
     ImGui.End();

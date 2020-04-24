@@ -1,12 +1,16 @@
+//
+// an imgui "implementation" based on builtin modules
+//
 #import "Basic";
 #import "ImGui";
-#import "Time";
 #import "Window_Creation";
-Input :: #import "Input";
 #import "Math";
 #import "GL";
+Clipboard :: #import "Clipboard";
+Input :: #import "Input";
 
-// Data
+#scope_file
+
 g_Time: float64 = 0.0;
 g_MousePressed: [3]bool = {:bool: false, false, false };
 g_MouseWheel: float = 0.0;
@@ -23,16 +27,7 @@ g_VboHandle: GLuint = 0;
 g_VaoHandle: GLuint = 0;
 g_ElementsHandle: GLuint = 0;
 
-/*
-cursor_arrow: *SDL_Cursor;
-cursor_text_input: *SDL_Cursor;
-cursor_move: *SDL_Cursor;
-cursor_resize_ns: *SDL_Cursor;
-cursor_resize_ew: *SDL_Cursor;
-cursor_resize_nesw: *SDL_Cursor;
-cursor_resize_nwse: *SDL_Cursor;
-*/
-
+#scope_export
 
 // This is the main rendering function that you have to implement and provide to ImGui (via setting up 'RenderDrawListsFn' in the ImGuiIO structure)
 // Note that this implementation is little overcomplicated because we are saving/setting up/restoring every OpenGL state explicitly, in order to be able to run within any OpenGL engine that doesn't do so. 
@@ -140,12 +135,17 @@ ImGui_Impl_RenderDrawLists :: (draw_data: *ImDrawData) #c_call {
 }
 
 ImGui_Impl_GetClipboardText :: (data: *void) -> *u8 #c_call {
-    return null;
-    //return SDL_GetClipboardText(); // XXX
+    new_context: Context; // TODO: hide the context in the userdata pointer passed to us
+    push_context new_context {
+        return to_c_string(Clipboard.os_clipboard_get_text());
+    }
 }
 
 ImGui_Impl_SetClipboardText :: (data: *void, text: *u8) #c_call {
-    //SDL_SetClipboardText(text); // XXX
+    new_context: Context;
+    push_context new_context {
+        Clipboard.os_clipboard_set_text(to_string(text));
+    }
 }
 
 // You can read the io.WantCaptureMouse, io.WantCaptureKeyboard flags to tell if dear imgui wants to use your inputs.
@@ -165,30 +165,18 @@ ImGui_Impl_ProcessEvent :: (event: Input.Event) -> bool {
                 case Key_Code.MOUSE_BUTTON_LEFT;   g_MousePressed[0] = event.key_pressed != 0;
                 case Key_Code.MOUSE_BUTTON_MIDDLE; g_MousePressed[1] = event.key_pressed != 0;
                 case Key_Code.MOUSE_BUTTON_RIGHT;  g_MousePressed[2] = event.key_pressed != 0;
+                case;
+                    io.KeysDown[event.key_code] = event.key_pressed != 0;
+                    io.KeyShift = event.shift_pressed;
+                    io.KeyCtrl = event.ctrl_pressed;
+                    io.KeyAlt = event.alt_pressed;
             }
-            io.KeysDown[event.key_code] = event.key_pressed != 0;
-            io.KeyShift = event.shift_pressed;
-            io.KeyCtrl = event.ctrl_pressed;
-            io.KeyAlt = event.alt_pressed;
             return true;
         case Event_Type.TEXT_INPUT;
-            buf := talloc(10);
+            buf := talloc(size_of(s32) + 1); // unicode rune + 0
             memcpy(buf, *event.utf32, size_of(s32));
             io.AddInputCharactersUTF8(io, buf);
             return true;
-        /* XXX
-        case SDL_KEYDOWN; #through;
-        case SDL_KEYUP;
-            //@@key := event.key.keysym.sym & ~SDLK_SCANCODE_MASK;
-            key := event.key.keysym.sym & (xx ~(1<<30));
-            io.KeysDown[key] = (event.type == SDL_KEYDOWN);
-            kmod := SDL_GetModState();
-            io.KeyShift = ((kmod & KMOD_SHIFT) != 0);
-            io.KeyCtrl = ((kmod & KMOD_CTRL) != 0);
-            io.KeyAlt = ((kmod & KMOD_ALT) != 0);
-            io.KeySuper = ((kmod & KMOD_GUI) != 0);
-            return true;
-        */
     }
     return false;
 }
@@ -356,15 +344,7 @@ ImGui_Impl_Init :: (native_window_handle: *void) -> bool {
         io.ImeWindowHandle = native_window_handle;
     }
 
-    /* XXX 
-    cursor_arrow = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_ARROW);
-    cursor_text_input = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_IBEAM);
-    cursor_move = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_HAND);
-    cursor_resize_ns = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENS);
-    cursor_resize_ew = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZEWE);
-    cursor_resize_nesw = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENESW);
-    cursor_resize_nwse = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_SIZENWSE);
-    */
+    // TODO: Cursors
 
     return true;
 }
@@ -380,15 +360,11 @@ ImGui_Impl_NewFrame :: (native_window_handle: *void, display_width: s32, display
     io := ImGui.GetIO();
 
     // Setup display size (every frame to accommodate for window resizing)
-    //SDL_GetWindowSize(window, *w, *h);
-    //SDL_GL_GetDrawableSize(window, *display_w, *display_h);
     io.DisplaySize = make_vector2(xx display_width, xx display_height);
-    io.DisplayFramebufferScale = make_vector2(1, 1);//cast(float) display_w / w, cast(float) display_h / h);
+    io.DisplayFramebufferScale = make_vector2(1, 1);
 
     // Setup time step
     current_time := get_time();
-    //time := SDL_GetTicks();
-    //current_time : float64 = time / 1000.0;
     if g_Time > 0.0 io.DeltaTime = xx (current_time - g_Time);
     else io.DeltaTime = (1.0/60.0);
     g_Time = current_time;
@@ -400,13 +376,12 @@ ImGui_Impl_NewFrame :: (native_window_handle: *void, display_width: s32, display
     io.MouseDown[0] = g_MousePressed[0];      // If a mouse press event came, always pass it as "mouse held this frame", so we don't miss click-release events that are shorter than 1 frame.
     io.MouseDown[1] = g_MousePressed[1];
     io.MouseDown[2] = g_MousePressed[2];
-    g_MousePressed[0], g_MousePressed[1], g_MousePressed[2] = false, false, false;
 
     io.MouseWheel = g_MouseWheel;
     g_MouseWheel = 0.0;
 
     // Hide OS mouse cursor if ImGui is drawing it
-    //SDL_ShowCursor(xx (io.MouseDrawCursor == false));
+    // TODO: cursors
 
     // Start the frame. This call will update the io.WantCaptureMouse, io.WantCaptureKeyboard flag that you can use to dispatch inputs (or not) to your application.
     ImGui.NewFrame();
