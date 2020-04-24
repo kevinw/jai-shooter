@@ -18,6 +18,7 @@ Pool :: #import "Pool";
 #load "physics.jai";
 
 #if OS_WINDOWS {
+    // press ` (~) to show the imgui debug ui for editing settings live.
     DEBUG_UI :: true; 
 } else {
     // TODO: implement some of the imgui input bits for non windows platforms
@@ -99,7 +100,7 @@ LOW_SHADOW_MAP_SIZE    :: 512;
 MEDIUM_SHADOW_MAP_SIZE :: 1024;
 HIGH_SHADOW_MAP_SIZE   :: 2048;
 
-INITIAL_GRID_SIZE :: 11;
+PLAY_AREA_SIZE :: 11;
 
 game: struct {
     static: [..]AABB;
@@ -131,8 +132,8 @@ game: struct {
         camera: struct {
             pos: Vector3;
             pos.x = 0;
-            pos.y = 8.0;
-            pos.z = 1.0;
+            pos.y = 6.74;
+            pos.z = 1.75;
         };
         sun_light: struct {
             radiance: Vector3;
@@ -217,7 +218,7 @@ game: struct {
     tree: [] *Model;
     generic_floor_tile: *Model;
 
-    grid_size: u32 = INITIAL_GRID_SIZE; // width and height of the grid
+    grid_size: u32 = PLAY_AREA_SIZE; // width and height of the grid
     grid_offset_x: float;
     grid_offset_y: float;
     
@@ -455,12 +456,17 @@ render_game :: () {
 
     RENDER_TREES :: true;
 
+    render_model :: inline (model: *Model) {
+        for model.meshes
+            render_mesh(it);
+    }
+
     if RENDER_TREES {
     for x: -4..-1 {
         for y: -1..cast(s32) (game.grid_size/4 + 1) {
             models := game.tree;
             for model: models { model.meshes[0].model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x + (x * 2), 0, game.grid_offset_y + (y*4) - (x % 2)*2)); }
-            for model: models for model.meshes render_mesh(it);
+            for models render_model(it);
         }
     }
 
@@ -468,7 +474,7 @@ render_game :: () {
         for y: -1..cast(s32) (game.grid_size/4 + 1) {
             models := game.tree;
             for model: models { model.meshes[0].model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x + game.grid_size + (x * 2), 0, game.grid_offset_y + (y*4) - (x % 2)*2)); }
-            for model: models for model.meshes render_mesh(it);
+            for models render_model(it);
         }
     }
 
@@ -476,7 +482,7 @@ render_game :: () {
         for y: -4..-1 {
             models := game.tree;
             for model: models { model.meshes[0].model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x + (x * 4) - (y % 2)*2, 0, game.grid_offset_y + (y*2))); }
-            for model: models for model.meshes render_mesh(it);
+            for models render_model(it);
         }
     }
 
@@ -484,7 +490,7 @@ render_game :: () {
         for y: 1..4 {
             models := game.tree;
             for model: models { model.meshes[0].model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x + (x * 4) - (y % 2)*2, 0, game.grid_offset_y + game.grid_size + (y*2))); }
-            for model: models for model.meshes render_mesh(it);
+            for models render_model(it);
         }
     }
     } // RENDER_TREES
@@ -513,7 +519,7 @@ render_game :: () {
         model.meshes[0].material.diffuse = make_vector3(0.5, 0.5, 1.0);
         model.meshes[0].model_matrix = actor_model_matrix(*game.player, extra_rot=game.player.walk_rotate);//, .36);
         defer model.meshes[0].model_matrix = matrix4_identity();
-        for model.meshes render_mesh(it);
+        render_model(model);
     }
 
     // render enemies
@@ -524,7 +530,7 @@ render_game :: () {
             model.meshes[0].material.diffuse = make_vector3(1.0, 0.2, 0.1);
             model.meshes[0].model_matrix = actor_model_matrix(it);//, .36);
             defer model.meshes[0].model_matrix = matrix4_identity();
-            for model.meshes render_mesh(it);
+            render_model(model);
         }
     }
 
@@ -537,7 +543,7 @@ render_game :: () {
             scale_val := game.settings.visual_bullet_size;
             model.meshes[0].model_matrix = translation * make_scale_matrix(scale_val, scale_val, scale_val);
             defer model.meshes[0].model_matrix = matrix4_identity();
-            for model.meshes render_mesh(it);
+            render_model(model);
         }
     }
 
@@ -598,14 +604,14 @@ render_game :: () {
     if game.player_has_crashed {
         glEnable(GL_BLEND);
         glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
-        draw_quad(make_Quad(0, 0, cast(float) game.window_width, cast(float) game.window_height), make_vector4(0.2, 0.2, 0.2, 0.5));
+        draw_quad(make_Quad(0, 0, cast(float) game.window_width, cast(float) game.window_height), make_vector4(0.9, 0.2, 0.2, 0.6));
         glDisable(GL_BLEND);
 
         white := make_vector4(1, 1, 1, 1);
 
         base := game.window_height - 164;
 
-        GAME_OVER_TEXT :: "Game Over! Press '%' to play again!";
+        GAME_OVER_TEXT :: "Game Ovah. You got % points. Press '%' to play again!";
         {
             button_or_key_name := "";
             if gamepad.connected {
@@ -616,7 +622,7 @@ render_game :: () {
 
             color := white;
             offset := game.window_width / 2  - get_string_width_in_pixels(game.font, GAME_OVER_TEXT) / 2;
-            draw_text(game.font, color, offset, game.window_height / 2 + FONT_HEIGHT / 2, GAME_OVER_TEXT, button_or_key_name);
+            draw_text(game.font, color, offset, game.window_height / 2 + FONT_HEIGHT / 2, GAME_OVER_TEXT, game.stats.num_enemies_defeated, button_or_key_name);
         }
     }
 }
@@ -650,6 +656,11 @@ render_light_shadowmap :: (using light: *Light) {
     render_game();
 }
 
+draw_text_centered :: (color: Vector4, y: s32, text: string) {
+    x := game.window_width / 2  - get_string_width_in_pixels(game.font, text) / 2;
+    draw_text(game.font, color, xx x, xx y, text);
+}
+
 render_menu :: () {
     proj := game.projection;
     defer game.projection = proj;
@@ -667,32 +678,27 @@ render_menu :: () {
     yellow := make_vector4(1, 1, 0, 1);
     white  := make_vector4(1, 1, 1, 1);
 
-    base := game.window_height - 164;
+    base := game.window_height - 330 + 64;
 
     using Menu_Selection;
 
-    CONTINUE_GAME_TEXT :: "Continue";
+
     {
         color := white;
         if game.menu_selection == CONTINUE_GAME then color = yellow;
-        offset := game.window_width / 2  - get_string_width_in_pixels(game.font, CONTINUE_GAME_TEXT) / 2;
-        draw_text(game.font, color, offset, base + 64, CONTINUE_GAME_TEXT);
+        draw_text_centered(color, xx base, "Continue");
     }
-
-    RESET_GAME_TEXT :: "Reset Game";
+    base -= 64;
     {
         color := white;
         if game.menu_selection == RESET_GAME then color = yellow;
-        offset := game.window_width / 2  - get_string_width_in_pixels(game.font, RESET_GAME_TEXT) / 2;
-        draw_text(game.font, color, offset, base, RESET_GAME_TEXT);
+        draw_text_centered(color, base, "Reset Game");
     }
-
-    QUIT_GAME_TEXT :: "Quit";
+    base -= 64;
     {
         color := white;
         if game.menu_selection == QUIT then color = yellow;
-        offset := game.window_width / 2  - get_string_width_in_pixels(game.font, QUIT_GAME_TEXT) / 2;
-        draw_text(game.font, color, offset, base - 64, QUIT_GAME_TEXT);
+        draw_text_centered(color, base, "Quit");
     }
 }
 
@@ -737,7 +743,7 @@ damage_player :: (player: *Player) {
         game.player_has_crashed = true;
     }
 
-    play_sound(game.hurt_sound, true);
+    play_sound(game.hit_wall_sound, true);
     game.screen_shake_percent = game.settings.player.hurt_screenshake;
     player.hurt_cooldown = game.settings.player.hurt_cooldown;
 
@@ -864,6 +870,7 @@ update_game :: (dt: float) {
                 fire_vector := unit_vector(make_vector3(cos(shoot_angle), sin(shoot_angle), 0));
                 look_direction = fire_vector.xy;
                 if timer_done(dt, *shoot_cooldown, settings.enemy.fire_rate) {
+                    play_sound(game.arrow_sound, perturb=true, volume=0.2);
                     bullet: Bullet;
                     bullet.pos = pos;
                     bullet.extents.x = settings.bullet_size;
@@ -993,8 +1000,8 @@ spawn_new_enemy :: () {
 
     enemy.extents = make_vector2(game.settings.enemy.size, game.settings.enemy.size);
 
-    enemy.pos.x = random_get_within_range(0, INITIAL_GRID_SIZE - 1);
-    enemy.pos.y = random_get_within_range(0, INITIAL_GRID_SIZE - 1);
+    enemy.pos.x = random_get_within_range(0, PLAY_AREA_SIZE - 1);
+    enemy.pos.y = random_get_within_range(0, PLAY_AREA_SIZE - 1);
 
     enemy.state = Enemy_State.SPAWNING;
     enemy.timer = random_get_within_range(1.0, 2.0);
@@ -1008,7 +1015,7 @@ reset_game :: () {
     // setup player
     {
         using game.player;
-        pos = make_vector2(INITIAL_GRID_SIZE / 2, INITIAL_GRID_SIZE / 2);
+        pos = make_vector2(PLAY_AREA_SIZE / 2, PLAY_AREA_SIZE / 2);
         extents.x = game.settings.player.size;
         extents.y = game.settings.player.size;
     }
@@ -1033,30 +1040,30 @@ reset_game :: () {
             return box;
         }
         
-        half_grid_size := cast(float)INITIAL_GRID_SIZE * .5;
+        half_grid_size := cast(float)PLAY_AREA_SIZE * .5;
 
         // add colliders for the walls
         array_add(*game.static,
             make_static_collider(-1, half_grid_size, 1, half_grid_size + 2),
             make_static_collider(half_grid_size, -1, half_grid_size + 2, 1),
-            make_static_collider(INITIAL_GRID_SIZE, half_grid_size, 1, half_grid_size + 2),
-            make_static_collider(half_grid_size, INITIAL_GRID_SIZE, half_grid_size + 2, 1));
+            make_static_collider(PLAY_AREA_SIZE, half_grid_size, 1, half_grid_size + 2),
+            make_static_collider(half_grid_size, PLAY_AREA_SIZE, half_grid_size + 2, 1));
     }
 
-    game.grid_size = INITIAL_GRID_SIZE;
+    using game;
     
-    game.mode = game.mode.GAME;
+    mode = game.mode.GAME;
 
-    game.down_pressed = false;
-    game.up_pressed = false;
-    game.left_pressed = false;
-    game.right_pressed = false;
-    game.enter_pressed = false;
+    down_pressed = false;
+    up_pressed = false;
+    left_pressed = false;
+    right_pressed = false;
+    enter_pressed = false;
 
-    game.menu_selection = Menu_Selection.CONTINUE_GAME;
+    menu_selection = Menu_Selection.CONTINUE_GAME;
 
-    game.player_has_crashed = false;
-    game.screen_shake_percent = 1;
+    player_has_crashed = false;
+    screen_shake_percent = 1;
 }
 
 
@@ -1158,7 +1165,7 @@ load_resources :: () {
     game.hit_wall_sound = load_audio_file("data/Jump_1.ogg");
     game.hurt_sound = load_audio_file("data/hurt.ogg");
 
-    game.ambience = load_audio_file("data/Forest_Ambience.ogg");
+    game.ambience = load_audio_file("data/bgm.ogg");
 
     {
         vert := read_entire_file("data/shaders/textured_quad.vert");
@@ -1245,7 +1252,7 @@ do_frame :: (window: Window_Type) -> did_render_frame: bool {
                     case cast(Key_Code)(#char "P");
                         if key_down { if time_scale > 0 time_scale = 0; else time_scale = 1; }
 
-                    case cast(Key_Code)(#char "R"); if key_down reset_game();
+                    //case cast(Key_Code)(#char "R"); if key_down reset_game();
 
                     case cast(Key_Code)(#char "W"); input_direction[Direction.UP]    = key_down;
                     case cast(Key_Code)(#char "A"); input_direction[Direction.LEFT]  = key_down;
@@ -1433,7 +1440,7 @@ main :: () {
 
         stream := play_sound(ambience, false);
         stream.flags |= stream.REPEATING;
-        stream.user_volume_scale = 0.8;
+        stream.user_volume_scale = 0.5;
     
         view = matrix4_identity();
     
