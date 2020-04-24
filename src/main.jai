@@ -1,4 +1,3 @@
-
 #import "Basic";
 #import "GL";
 #import "Window_Creation";
@@ -71,8 +70,10 @@ Enemy :: struct {
 Player :: struct {
     using actor: Actor;
 
-    extents.x = game.settings.player.size;
-    extents.y = game.settings.player.size;
+    health := 3;
+
+    walk_rotate: float;
+    walk_dir: s8 = 1;
 }
 
 Occupant :: enum {
@@ -92,7 +93,7 @@ Menu_Selection :: enum s8 {
 };
 Menu_Selection_MAX :: 2;
 
-FONT_HEIGHT :: 32;
+FONT_HEIGHT :: 28;
 
 LOW_SHADOW_MAP_SIZE    :: 512;
 MEDIUM_SHADOW_MAP_SIZE :: 1024;
@@ -182,7 +183,7 @@ game: struct {
 
     immediate_draw_buffer_id: u32;
 
-    shadow_map_size: s32 = LOW_SHADOW_MAP_SIZE;
+    shadow_map_size: s32 = MEDIUM_SHADOW_MAP_SIZE;
 
     msaa := true;
     
@@ -212,7 +213,6 @@ game: struct {
     
     snake_head: *Model;
     fruit: *Model;
-    fruit_leaf: *Model;
     wall: *Model;
     tree: [] *Model;
     generic_floor_tile: *Model;
@@ -229,8 +229,6 @@ game: struct {
     screen_shake_percent := 1.0;
     screen_shake_step := 2.1;
     shake_amount := 1.0;
-
-    snake_failed_on_turn := false;
 
     fps_string: string;
 };
@@ -419,6 +417,7 @@ render_game :: () {
 
     {
         model := game.generic_floor_tile;
+        model.meshes[0].material.diffuse = make_vector3(0.3, 1.0, 0.4);
         model_matrix := matrix4_identity();
 
         for model.meshes {
@@ -448,6 +447,7 @@ render_game :: () {
         model := game.wall;
         model_matrix := make_translation_matrix4(make_vector3(game.grid_offset_x, 0, game.grid_offset_y));
         for model.meshes {
+            it.material.diffuse = make_vector3(0.4, 0.2, 0.2);
             it.model_matrix = model_matrix;
             render_mesh(it);
         }
@@ -489,22 +489,29 @@ render_game :: () {
     }
     } // RENDER_TREES
 
-    actor_model_matrix :: (using actor: *Actor, scale:float = 1) -> Matrix4 {
+    actor_model_matrix :: (using actor: *Actor, scale:float = 1, extra_rot:float = 0) -> Matrix4 {
         translation := make_translation_matrix4(make_vector3(pos.x + game.grid_offset_x + bias, bias, pos.y + game.grid_offset_y + bias));
 
         q: Quaternion;
         set_from_axis_and_angle(*q, 0, 1, 0, TAU * .25 + angle_radians_vec2(look_direction));
+            
         scl: Matrix4 = matrix4_identity();
         if scale != 1 scl = make_scale_matrix(scale, scale, scale);
         rot := make_rotation_matrix4(q);
+        if extra_rot != 0 {
+            extra_q: Quaternion;
+            set_from_axis_and_angle(*extra_q, 0.0, 0.5, 0.5, extra_rot);
+            rot *= make_rotation_matrix4(extra_q);
+        }
 
         return translation * scl * rot;
     }
 
     // render player
-    if game.player.hurt_cooldown <= 0 || (game.rendered_frame_count & 1) {
+    if !game.player_has_crashed && (game.player.hurt_cooldown <= 0 || (game.rendered_frame_count & 1)) {
         model := game.snake_head;
-        model.meshes[0].model_matrix = actor_model_matrix(*game.player);//, .36);
+        model.meshes[0].material.diffuse = make_vector3(0.5, 0.5, 1.0);
+        model.meshes[0].model_matrix = actor_model_matrix(*game.player, extra_rot=game.player.walk_rotate);//, .36);
         defer model.meshes[0].model_matrix = matrix4_identity();
         for model.meshes render_mesh(it);
     }
@@ -513,6 +520,8 @@ render_game :: () {
     for * game.enemies {
         if it.state != Enemy_State.SPAWNING || (game.rendered_frame_count & 1) {
             model := game.snake_head;
+            model.meshes[0].model_matrix = actor_model_matrix(it);//, .36);
+            model.meshes[0].material.diffuse = make_vector3(1.0, 0.2, 0.1);
             model.meshes[0].model_matrix = actor_model_matrix(it);//, .36);
             defer model.meshes[0].model_matrix = matrix4_identity();
             for model.meshes render_mesh(it);
@@ -533,7 +542,7 @@ render_game :: () {
     }
 
     // render debug AABB
-    {
+    if false {
         glDisable(GL_DEPTH_TEST);
         defer glEnable(GL_DEPTH_TEST);
 
@@ -572,7 +581,7 @@ render_game :: () {
 
     {
         base := game.window_height - FONT_HEIGHT;
-        text := tprint("%1%2", "Defeated: ", game.stats.num_enemies_defeated);
+        text := tprint("Defeated: % - Health: %", game.stats.num_enemies_defeated, game.player.health);
         color := white;
         offset := 0;
         draw_text(game.font, color, offset, base, text);
@@ -667,7 +676,7 @@ render_menu :: () {
         color := white;
         if game.menu_selection == CONTINUE_GAME then color = yellow;
         offset := game.window_width / 2  - get_string_width_in_pixels(game.font, CONTINUE_GAME_TEXT) / 2;
-        draw_text(game.font, color, offset, game.window_height - 164 + 64, CONTINUE_GAME_TEXT);
+        draw_text(game.font, color, offset, base + 64, CONTINUE_GAME_TEXT);
     }
 
     RESET_GAME_TEXT :: "Reset Game";
@@ -675,7 +684,7 @@ render_menu :: () {
         color := white;
         if game.menu_selection == RESET_GAME then color = yellow;
         offset := game.window_width / 2  - get_string_width_in_pixels(game.font, RESET_GAME_TEXT) / 2;
-        draw_text(game.font, color, offset, game.window_height - 164, RESET_GAME_TEXT);
+        draw_text(game.font, color, offset, base, RESET_GAME_TEXT);
     }
 
     QUIT_GAME_TEXT :: "Quit";
@@ -683,7 +692,7 @@ render_menu :: () {
         color := white;
         if game.menu_selection == QUIT then color = yellow;
         offset := game.window_width / 2  - get_string_width_in_pixels(game.font, QUIT_GAME_TEXT) / 2;
-        draw_text(game.font, color, offset, game.window_height - 164 - 64, QUIT_GAME_TEXT);
+        draw_text(game.font, color, offset, base - 64, QUIT_GAME_TEXT);
     }
 }
 
@@ -722,12 +731,16 @@ render :: () {
     #if DEBUG_UI ImGui.Render();
 }
 
-damage_player :: () {
-    using game;
+damage_player :: (player: *Player) {
+    player.health -= 1;
+    if player.health <= 0 {
+        game.player_has_crashed = true;
+    }
 
-    play_sound(hurt_sound, true);
-    screen_shake_percent = settings.player.hurt_screenshake;
-    player.hurt_cooldown = settings.player.hurt_cooldown;
+    play_sound(game.hurt_sound, true);
+    game.screen_shake_percent = game.settings.player.hurt_screenshake;
+    player.hurt_cooldown = game.settings.player.hurt_cooldown;
+
 }
 
 move_actor :: (using actor: *Actor, delta: Vector2) {
@@ -747,11 +760,8 @@ update_game :: (dt: float) {
         if enter_pressed reset_game();
     }
 
-    turned := false;
-    turned_right := true;
-
     // update player
-    {
+    if !game.player_has_crashed {
         move_delta : Vector2;
         for vec, idx: direction_vectors if input_direction[idx]
             move_delta += vec;
@@ -759,11 +769,24 @@ update_game :: (dt: float) {
 
         move_actor(*player, move_delta * settings.player.speed * dt);
 
+        if move_delta.x != 0 || move_delta.y != 0 {
+            SPD :: 20.0;
+            if player.walk_dir > 0
+                player.walk_rotate += dt * SPD;
+            else
+                player.walk_rotate -= dt * SPD;
+
+            if abs(player.walk_rotate) > TAU / 4.0
+                player.walk_dir *= -1;
+        } else {
+            player.walk_rotate = 0;
+        }
+
         // check collision against enemies
         if timer_done(dt, *player.hurt_cooldown) {
             for * enemies {
                 if it.state != Enemy_State.SPAWNING && overlaps(it, *player) {
-                    damage_player();
+                    damage_player(*player);
                     break;
                 }
             }
@@ -796,16 +819,16 @@ update_game :: (dt: float) {
         roll := random_get_zero_to_one();
         if #complete state == {
             case SPAWNING;
-                if roll < .5 state = FIRING;
+                if roll < .5 || game.player_has_crashed state = FIRING;
                 else state = CHASING_PLAYER;
             case CHASING_PLAYER;
                 if roll < .3 state = FIRING;
                 else state = WAITING;
             case WAITING;
-                if roll < .3 state = FIRING;
+                if roll < .3 || game.player_has_crashed state = FIRING;
                 else state = CHASING_PLAYER;
             case FIRING;
-                if roll < .3 state = CHASING_PLAYER;
+                if roll < .3 && !game.player_has_crashed state = CHASING_PLAYER;
                 else state = WAITING;
         }
     }
@@ -815,12 +838,9 @@ update_game :: (dt: float) {
 
         determine_next_state(enemy);
         if state == {
-            case SPAWNING;
-                timer = random_get_within_range(1, 1.2);
-            case CHASING_PLAYER;
-                timer = 0; // random_get_within_range(1, 3);
-            case WAITING;
-                timer = random_get_within_range(2, 4);
+            case SPAWNING;       timer = random_get_within_range(1, 1.2);
+            case CHASING_PLAYER; timer = random_get_within_range(1, 3);
+            case WAITING;        timer = random_get_within_range(2, 4);
             case FIRING;
                 timer = random_get_within_range(3, 4);
                 shoot_angle = random_get_zero_to_one() * TAU;
@@ -846,6 +866,8 @@ update_game :: (dt: float) {
                 if timer_done(dt, *shoot_cooldown, settings.enemy.fire_rate) {
                     bullet: Bullet;
                     bullet.pos = pos;
+                    bullet.extents.x = settings.bullet_size;
+                    bullet.extents.y = settings.bullet_size;
                     bullet.vel = fire_vector.xy * settings.enemy.bullet_speed;
                     bullet.friendly = false;
                     array_add(*bullets, bullet);
@@ -885,6 +907,7 @@ update_game :: (dt: float) {
                 if enemy.state != Enemy_State.SPAWNING && overlaps(bullet, enemy) {
                     remove enemy;
                     game.stats.num_enemies_defeated += 1;
+                    settings.enemy.spawn_at_a_time += 0.5;
                     play_sound(game.hit_wall_sound, true);
                     game.screen_shake_percent = 0.85;
                     remove bullet;
@@ -892,8 +915,8 @@ update_game :: (dt: float) {
                 }
             }
         } else {
-            if overlaps(bullet, *player) {
-                damage_player();
+            if !game.player_has_crashed && overlaps(bullet, *player) {
+                damage_player(*player);
                 remove bullet;
                 continue;
             }
@@ -927,7 +950,6 @@ update_menu :: (dt: float) {
 
 update :: (dt: float) {
     using game;
-    dt *= time_scale;
 
     #if DEBUG_UI {
         lights[0].radiance = settings.sun_light.radiance;
@@ -935,7 +957,7 @@ update :: (dt: float) {
     }
     
     if #complete mode == {
-        case mode.GAME; update_game(dt);
+        case mode.GAME; update_game(dt * time_scale);
         case mode.MENU; update_menu(dt);
     }
 
@@ -981,18 +1003,24 @@ spawn_new_enemy :: () {
 }
 
 reset_game :: () {
+    game.stats.num_enemies_defeated = 0;
+
+    // setup player
     {
         using game.player;
-        pos = make_vector2(0, 0);
+        pos = make_vector2(INITIAL_GRID_SIZE / 2, INITIAL_GRID_SIZE / 2);
+        extents.x = game.settings.player.size;
+        extents.y = game.settings.player.size;
     }
 
     // setup enemies
     {
         array_reset(*game.enemies);
-        for 0..game.settings.enemy.initial_spawn_count-1 {
+        for 0..game.settings.enemy.initial_spawn_count-1
             spawn_new_enemy();
-        }
     }
+
+    array_reset(*game.bullets);
 
     // setup collision
     {
@@ -1008,17 +1036,15 @@ reset_game :: () {
         half_grid_size := cast(float)INITIAL_GRID_SIZE * .5;
 
         // add colliders for the walls
-        array_add(*game.static, make_static_collider(-1, half_grid_size, 1, half_grid_size + 2));
-        array_add(*game.static, make_static_collider(half_grid_size, -1, half_grid_size + 2, 1));
-        array_add(*game.static, make_static_collider(INITIAL_GRID_SIZE, half_grid_size, 1, half_grid_size + 2));
-        array_add(*game.static, make_static_collider(half_grid_size, INITIAL_GRID_SIZE, half_grid_size + 2, 1));
+        array_add(*game.static,
+            make_static_collider(-1, half_grid_size, 1, half_grid_size + 2),
+            make_static_collider(half_grid_size, -1, half_grid_size + 2, 1),
+            make_static_collider(INITIAL_GRID_SIZE, half_grid_size, 1, half_grid_size + 2),
+            make_static_collider(half_grid_size, INITIAL_GRID_SIZE, half_grid_size + 2, 1));
     }
 
     game.grid_size = INITIAL_GRID_SIZE;
     
-    STARTING_X :: 3;
-    STARTING_Y :: 2;
-
     game.mode = game.mode.GAME;
 
     game.down_pressed = false;
@@ -1031,7 +1057,6 @@ reset_game :: () {
 
     game.player_has_crashed = false;
     game.screen_shake_percent = 1;
-    game.snake_failed_on_turn = false;
 }
 
 
@@ -1149,12 +1174,11 @@ load_resources :: () {
     }
 
     bytes_loaded: s64;
-    game.font, bytes_loaded = load_font("data", "KarminaBoldItalic.otf", FONT_HEIGHT);
+    game.font, bytes_loaded = load_font("data", "YanoneKaffeesatz-Regular.otf", FONT_HEIGHT);
 
     game.snake_head = load_obj("data/head.obj")[0];
     fruit_objs := load_obj("data/apple.obj");
     game.fruit = get_model_by_tag(fruit_objs, "Fruit_Body");
-    game.fruit_leaf = get_model_by_tag(fruit_objs, "Leaf");
 
     wall_model := load_obj("data/wall.obj")[0];
     game.wall = generate_wall_model_from_tile(wall_model);
@@ -1166,7 +1190,6 @@ load_resources :: () {
 
     buffer_model(game.snake_head);
     buffer_model(game.fruit);
-    buffer_model(game.fruit_leaf);
 
     buffer_model(game.wall);
     for game.tree buffer_model(it);

@@ -1,4 +1,4 @@
 x slide against walls
 - spawn a few obstacles
-- ensure enemy bullets can hit you
+x ensure enemy bullets can hit you
 - make health, game over screen

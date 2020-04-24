@@ -20,17 +20,18 @@ try_move :: (a: *AABB, delta: Vector2, static: []AABB) -> bool {
     }
 
     new_pos := a.pos + delta;
-    for * static {
-        collision: Vector2 = ---;
-        if overlaps_delta(a, it, *collision) {
-            if collision.x > 0 collision.x = 0;
-            if collision.y > 0 collision.y = 0;
+    collision: Vector2 = ---;
 
-            if collision.x > collision.y
-                new_pos.x -= sign(a.pos.x - it.pos.x) * collision.x;
-            else 
-                new_pos.y -= sign(a.pos.y - it.pos.y) * collision.y;
-        }
+    for * static {
+        if !overlaps_delta(a, it, *collision) continue;
+
+        if collision.x > 0 collision.x = 0;
+        if collision.y > 0 collision.y = 0;
+
+        if collision.x > collision.y
+            new_pos.x -= sign(a.pos.x - it.pos.x) * collision.x;
+        else 
+            new_pos.y -= sign(a.pos.y - it.pos.y) * collision.y;
     }
 
     a.pos = new_pos;
