@@ -131,7 +131,7 @@ void main() {
     }
 
     vec4 base_color = vertex_color * the_material.BaseColor * diffuse_texture_color;
-    vec4 ambient = base_color * vec4(0.03);
+    vec4 ambient = base_color * vec4(0.09);
 
     vec3 F0 = vec3(0.04);
     float Roughness = the_material.Roughness;

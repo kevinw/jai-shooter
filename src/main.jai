@@ -77,6 +77,7 @@ Player :: struct {
 
     walk_rotate: float;
     walk_dir: s8 = 1;
+    time_since_last_fire: float;
 }
 
 Occupant :: enum {
@@ -276,23 +277,32 @@ generate_wall_model_from_tile :: (tile: *Model) -> *Model {
         array_add(*result.meshes, mesh);
     }
 
+    make_wall_jitter_vector3 :: (x: float, y: float, z: float) -> Vector3 {
+        C :: 0.15;
+        return make_vector3(
+            x + random_get_within_range(0, C),
+            y + random_get_within_range(0, C),
+            z + random_get_within_range(0, C),
+        );
+    }
+
     { // East wall
         model := tile;
 
         for y: 0..game.grid_size-1 {
             for model.meshes {
-                it.model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x + game.grid_size + 1,  0, y + game.grid_offset_y));
+                it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(game.grid_offset_x + game.grid_size + 1,  0, y + game.grid_offset_y));
                 bake_and_concat_mesh(result.meshes[it_index], it);
             }
 
             for model.meshes {
-                it.model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x + game.grid_size + 1,  0, y + game.grid_offset_y + 0.5));
+                it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(game.grid_offset_x + game.grid_size + 1,  0, y + game.grid_offset_y + 0.5));
                 bake_and_concat_mesh(result.meshes[it_index], it);
             }
         }
 
         for model.meshes {
-            it.model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x + game.grid_size + 1,  0, game.grid_offset_y + game.grid_size));
+            it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(game.grid_offset_x + game.grid_size + 1,  0, game.grid_offset_y + game.grid_size));
             bake_and_concat_mesh(result.meshes[it_index], it);
         }
     }
@@ -305,19 +315,19 @@ generate_wall_model_from_tile :: (tile: *Model) -> *Model {
 
         for y: 0..game.grid_size-1 {
             for model.meshes {
-                it.model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x-1,  0, y + game.grid_offset_y + 0.5)) * rot;
+                it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(game.grid_offset_x-1,  0, y + game.grid_offset_y + 0.5)) * rot;
                 bake_and_concat_mesh(result.meshes[it_index], it);
             }
 
             for model.meshes {
-                it.model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x-1,  0, y + game.grid_offset_y + 1)) * rot;
+                it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(game.grid_offset_x-1,  0, y + game.grid_offset_y + 1)) * rot;
                 bake_and_concat_mesh(result.meshes[it_index], it);
             }
 
         }
 
         for model.meshes {
-            it.model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x-1,  0, game.grid_offset_y)) * rot;
+            it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(game.grid_offset_x-1,  0, game.grid_offset_y)) * rot;
             bake_and_concat_mesh(result.meshes[it_index], it);
         }
     }
@@ -331,18 +341,18 @@ generate_wall_model_from_tile :: (tile: *Model) -> *Model {
         for x: 0..game.grid_size-1 {            
 
             for model.meshes {
-                it.model_matrix = make_translation_matrix4(make_vector3(x + game.grid_offset_x + 0.5,  0, game.grid_offset_y-1)) * rot;
+                it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(x + game.grid_offset_x + 0.5,  0, game.grid_offset_y-1)) * rot;
                 bake_and_concat_mesh(result.meshes[it_index], it);
             }
 
             for model.meshes {
-                it.model_matrix = make_translation_matrix4(make_vector3(x + game.grid_offset_x + 1,  0, game.grid_offset_y-1)) * rot;
+                it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(x + game.grid_offset_x + 1,  0, game.grid_offset_y-1)) * rot;
                 bake_and_concat_mesh(result.meshes[it_index], it);
             }
         }
 
         for model.meshes {
-            it.model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x,  0, game.grid_offset_y-1)) * rot;
+            it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(game.grid_offset_x,  0, game.grid_offset_y-1)) * rot;
             bake_and_concat_mesh(result.meshes[it_index], it);
         }
     }
@@ -356,18 +366,18 @@ generate_wall_model_from_tile :: (tile: *Model) -> *Model {
         for x: 0..game.grid_size-1 {
 
             for model.meshes {
-                it.model_matrix = make_translation_matrix4(make_vector3(x + game.grid_offset_x,  0, game.grid_offset_y + game.grid_size + 1)) * rot;
+                it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(x + game.grid_offset_x,  0, game.grid_offset_y + game.grid_size + 1)) * rot;
                 bake_and_concat_mesh(result.meshes[it_index], it);
             }
 
             for model.meshes {
-                it.model_matrix = make_translation_matrix4(make_vector3(x + game.grid_offset_x + 0.5,  0, game.grid_offset_y + game.grid_size + 1)) * rot;
+                it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(x + game.grid_offset_x + 0.5,  0, game.grid_offset_y + game.grid_size + 1)) * rot;
                 bake_and_concat_mesh(result.meshes[it_index], it);
             }
         }
 
         for model.meshes {
-            it.model_matrix = make_translation_matrix4(make_vector3(game.grid_offset_x + game.grid_size,  0, game.grid_offset_y + game.grid_size + 1)) * rot;
+            it.model_matrix = make_translation_matrix4(make_wall_jitter_vector3(game.grid_offset_x + game.grid_size,  0, game.grid_offset_y + game.grid_size + 1)) * rot;
             bake_and_concat_mesh(result.meshes[it_index], it);
         }
     }
@@ -519,7 +529,11 @@ render_game :: () {
     if !game.player_has_crashed && (game.player.hurt_cooldown <= 0 || (game.rendered_frame_count & 1)) {
         model := game.snake_head;
         model.meshes[0].material.diffuse = make_vector3(0.5, 0.5, 1.0);
-        model.meshes[0].model_matrix = actor_model_matrix(*game.player, extra_rot=game.player.walk_rotate);//, .36);
+
+        curve :: (x: float) -> float { return 1.0 / pow(x, 0.2) * 0.5 + 0.5; }
+
+        player_scale := max(1.0, curve(game.player.time_since_last_fire));
+        model.meshes[0].model_matrix = actor_model_matrix(*game.player, scale=player_scale, extra_rot=game.player.walk_rotate);
         defer model.meshes[0].model_matrix = matrix4_identity();
         render_model(model);
     }
@@ -769,6 +783,7 @@ update_game :: (dt: float) {
     }
 
     // update player
+    game.player.time_since_last_fire += dt;
     if !game.player_has_crashed {
         move_delta : Vector2;
         for vec, idx: direction_vectors if input_direction[idx]
@@ -813,6 +828,7 @@ update_game :: (dt: float) {
                 using bullet: Bullet;
                 bullet.extents.x = settings.bullet_size;
                 bullet.extents.y = settings.bullet_size;
+                player.time_since_last_fire = 0;
                 pos = player.pos;
                 vel = fire_vector * settings.player.bullet_speed + move_delta * settings.player.move_speed_add_to_bullet;
                 array_add(*bullets, bullet);
@@ -1407,7 +1423,7 @@ main :: () {
     DEFAULT_WIN_WIDTH :: 1280;
     DEFAULT_WIN_HEIGHT :: 720;
 
-    window := create_window(DEFAULT_WIN_WIDTH, DEFAULT_WIN_HEIGHT, GAME_NAME);
+    window := create_window(DEFAULT_WIN_WIDTH, DEFAULT_WIN_HEIGHT, "Shooter");
     window_handle = xx window;
     gl_create_context(window, 3, 2);
     gl_load(*gl);
@@ -1438,9 +1454,9 @@ main :: () {
 
         load_resources();
 
-        stream := play_sound(ambience, false);
-        stream.flags |= stream.REPEATING;
-        stream.user_volume_scale = 0.5;
+        //stream := play_sound(ambience, false);
+        //stream.flags |= stream.REPEATING;
+        //stream.user_volume_scale = 0.5;
     
         view = matrix4_identity();
     
