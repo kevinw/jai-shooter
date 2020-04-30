@@ -12,6 +12,7 @@ Pool :: #import "Pool";
 #import "Gamepad";
 #import "System";
 
+#load "config.jai";
 #load "render.jai";
 #load "obj_loader.jai";
 #load "util.jai";
@@ -109,6 +110,7 @@ game: struct {
     static: [..]AABB;
 
     settings: struct {
+        mute_all_sounds: bool;
         enemy: struct {
             size := 0.45;
             fire_rate := 0.3;
@@ -907,8 +909,8 @@ update_game :: (dt: float) {
 
     // spawn new enemies
     if enemies.count < settings.enemy.max_count {
-        num_to_spawn := random_get_within_range(settings.enemy.spawn_delay_min, settings.enemy.spawn_delay_max);
-        if timer_done(dt, *enemy_spawn_cooldown, num_to_spawn) {
+        next_spawn_time := random_get_within_range(settings.enemy.spawn_delay_min, settings.enemy.spawn_delay_max);
+        if timer_done(dt, *enemy_spawn_cooldown, next_spawn_time) {
             for 0..(cast(int)(random_get_zero_to_one() * settings.enemy.spawn_at_a_time + 1) - 1)
                 spawn_new_enemy();
         }
@@ -1110,6 +1112,7 @@ window_handle: *void; // @Hack
 
 do_screenshot :: () {
     fb := game.game_framebuffer;
+
     tex: Texture;
     tex.width = fb.width;
     tex.height = fb.height;
@@ -1151,6 +1154,20 @@ init_game :: () {
     context.logger = (message: string, ident: string, mode: Log_Mode, data: *void) {
         print("[%] %", ident, message);
     };
+
+    {
+        found, exe_path, exe_name := split_by_character_from_right(get_path_of_running_executable(), #char "/");
+        if !found {
+            print("Error: unable to find my own exe\n");
+            return;
+        }
+        parse_config_file(*game.settings, tprint("%/%", exe_path, "shooter.cfg"));
+    }
+
+    direction_vectors[Direction.UP]    = make_vector2(0, -1);
+    direction_vectors[Direction.DOWN]  = make_vector2(0, 1);
+    direction_vectors[Direction.LEFT]  = make_vector2(-1, 0);
+    direction_vectors[Direction.RIGHT] = make_vector2(1, 0);
 
     Pool.set_allocators(*game.pool);
 
@@ -1322,30 +1339,18 @@ do_frame :: (window: Window_Type) -> did_render_frame: bool {
             if game.mode == game.mode.GAME then game.mode = game.mode.MENU;
             else if game.mode == game.mode.MENU then game.mode = game.mode.GAME;
         }
-
-        if gamepad.buttons[Gamepad_Code.DPAD_UP] & Key_Current_State.START {
+        if gamepad.buttons[Gamepad_Code.DPAD_UP] & Key_Current_State.START
             game.up_pressed = true;
-        }
-
-        if gamepad.buttons[Gamepad_Code.DPAD_DOWN] & Key_Current_State.START {
+        if gamepad.buttons[Gamepad_Code.DPAD_DOWN] & Key_Current_State.START
             game.down_pressed = true;
-        }
-
-        if gamepad.buttons[Gamepad_Code.DPAD_LEFT] & Key_Current_State.START {
+        if gamepad.buttons[Gamepad_Code.DPAD_LEFT] & Key_Current_State.START
             game.left_pressed = true;
-        }
-
-        if gamepad.buttons[Gamepad_Code.DPAD_RIGHT] & Key_Current_State.START {
+        if gamepad.buttons[Gamepad_Code.DPAD_RIGHT] & Key_Current_State.START
             game.right_pressed = true;
-        }
-
-        if gamepad.buttons[Gamepad_Code.A] & Key_Current_State.START {
+        if gamepad.buttons[Gamepad_Code.A] & Key_Current_State.START
             game.enter_pressed = true;
-        }
-
-        if gamepad.buttons[Gamepad_Code.B] & Key_Current_State.START {
+        if gamepad.buttons[Gamepad_Code.B] & Key_Current_State.START
             if game.mode == game.mode.MENU then game.mode = game.mode.GAME;
-        }
     }
 
     #if DEBUG_UI new_imgui_frame(window);
@@ -1415,11 +1420,6 @@ new_imgui_frame :: (window: *void) {
 main :: () {
     init_game();
 
-    direction_vectors[Direction.UP]    = make_vector2(0, -1);
-    direction_vectors[Direction.DOWN]  = make_vector2(0, 1);
-    direction_vectors[Direction.LEFT]  = make_vector2(-1, 0);
-    direction_vectors[Direction.RIGHT] = make_vector2(1, 0);
-
     DEFAULT_WIN_WIDTH :: 1280;
     DEFAULT_WIN_HEIGHT :: 720;
 
@@ -1448,15 +1448,17 @@ main :: () {
 
         sound_player = New(Sound_Player);
         sound_player.update_history = true;
+        if settings.mute_all_sounds
+            set_master_volume(sound_player, 0);
 
         success := init(sound_player, window, true, true);
         assert(success);
 
         load_resources();
 
-        //stream := play_sound(ambience, false);
-        //stream.flags |= stream.REPEATING;
-        //stream.user_volume_scale = 0.5;
+        stream := play_sound(ambience, false);
+        stream.flags |= stream.REPEATING;
+        stream.user_volume_scale = 0.5;
     
         view = matrix4_identity();
     
