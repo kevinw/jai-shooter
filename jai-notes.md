@@ -1,4 +1,4 @@
-# jai notes
+# Jai notes
 
 - Text_File_Handler could use a for loop iterator
 - got a crash using get_field (see main.jai)
