@@ -2,7 +2,6 @@
 #import "Reflection";
 Log :: #import "Log";
 
-
 for_expansion :: (handler: *Text_File_Handler, body: Code, pointer: bool, reverse: bool) #expand {
     #assert(!pointer && !reverse);
 
@@ -14,6 +13,7 @@ for_expansion :: (handler: *Text_File_Handler, body: Code, pointer: bool, revers
         #insert body;
     }
 }
+
 
 //
 // parse a config file and write values from it into the `target` struct

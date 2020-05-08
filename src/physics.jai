@@ -22,6 +22,8 @@ try_move :: (a: *AABB, delta: Vector2, static: []AABB) -> bool {
     new_pos := a.pos + delta;
     collision: Vector2 = ---;
 
+    sign :: f => ifx f >= 0 then 1 else -1;
+
     for * static {
         if !overlaps_delta(a, it, *collision) continue;
 
