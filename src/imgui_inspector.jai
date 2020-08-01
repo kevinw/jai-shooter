@@ -81,7 +81,7 @@ inspect :: (name: *u8, data: *void, info:*Type_Info) {
         case ENUM;
             info_enum := cast(*Type_Info_Enum) info;
 
-            if info_enum.is_flags {
+            if info_enum.enum_type_flags & .Is_Flags {
                 // @@ How to handle flags?
             }
             else {

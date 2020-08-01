@@ -681,7 +681,7 @@ resize_buffer :: (fbo: *Framebuffer, width: s32, height: s32) {
 
 get_framebuffer_dimensions :: (fb: *Framebuffer) -> (width: s32, height: s32) {
     if !fb {
-        #if OS_MACOSX {
+        #if OS == .MACOS {
             Objective_C :: #import "Objective_C";
             ctx := Objective_C.NSOpenGLContext.currentContext();
             view := ctx.view(ctx);

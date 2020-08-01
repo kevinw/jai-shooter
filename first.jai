@@ -6,12 +6,12 @@
 #import "File_Utilities";
 #import "File";
 
-#if OS_WINDOWS {
+#if OS == .WINDOWS {
     Windows_Resources :: #import "Windows_Resources";
     Ico_File :: #import "Ico_File";
 }
 
-#if OS_MACOSX {
+#if OS == .MACOS {
     Bundler :: #import "MacOS_Bundler";
 }
 
@@ -34,7 +34,7 @@ build :: (building_executable := true, build_release := false) -> Workspace {
     w := compiler_create_workspace(sprint("% by Kevin Watters", GAME_NAME)); // I think this @Leaks ?
     if building_executable then compiler_begin_intercept(w);
 
-    if BUILD_COCOA_APP && OS_MACOSX {
+    if BUILD_COCOA_APP && OS == .MACOS {
         opts.entry_point_name = "cocoa_application_main";
     }
 
@@ -59,7 +59,7 @@ build :: (building_executable := true, build_release := false) -> Workspace {
 
         compiler_end_intercept(w);
 
-        #if OS_WINDOWS {
+        #if OS == .WINDOWS {
             exe_name := sprint("%1%2.exe", opts.output_path, opts.output_executable_name);
             translate_path(exe_name, #char "\\");
             defer free(exe_name);
@@ -76,7 +76,7 @@ build :: (building_executable := true, build_release := false) -> Workspace {
             Windows_Resources.add_manifest_to_executable(exe_name, manifest_options);
         }
 
-        #if OS_MACOSX {
+        #if OS == .MACOS {
             success, exit_code, output, error := os_run_command("ibtool", "src/Main.storyboard", "--compile", "run_tree/Main.storyboardc");
             if !success {
                 print("Could not run ibtool on Main.storyboard.");

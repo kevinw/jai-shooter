@@ -299,7 +299,7 @@ ImGui_Impl_InvalidateDeviceObjects :: () {
     }
 }
 
-#if OS_WINDOWS {
+#if OS == .WINDOWS {
 
 Win32 :: #import "Windows";
 get_client_mouse_pos :: (window: *void) -> (x: s32, y: s32) {
@@ -340,7 +340,7 @@ ImGui_Impl_Init :: (native_window_handle: *void) -> bool {
     io.GetClipboardTextFn = ImGui_Impl_GetClipboardText;
     io.ClipboardUserData = null;
 
-    #if OS_WINDOWS {
+    #if OS == .WINDOWS {
         io.ImeWindowHandle = native_window_handle;
     }
 

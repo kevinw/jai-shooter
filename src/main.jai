@@ -18,7 +18,7 @@ Pool :: #import "Pool";
 #load "util.jai";
 #load "physics.jai";
 
-#if OS_WINDOWS {
+#if OS == .WINDOWS {
     // press ` (~) to show the imgui debug ui for editing settings live.
     DEBUG_UI :: true; 
 } else {
@@ -31,7 +31,7 @@ Pool :: #import "Pool";
     #load "imgui_inspector.jai";
 }
 
-#if OS_MACOSX {
+#if OS == .MACOS {
     #load "macosx.jai"; // Cocoa app stuff/entry point
 }
 
@@ -777,6 +777,7 @@ move_actor :: (using actor: *Actor, delta: Vector2) {
     }
 }
 
+
 update_game :: (dt: float) {
     using game;
 
@@ -790,7 +791,16 @@ update_game :: (dt: float) {
         move_delta : Vector2;
         for vec, idx: direction_vectors if input_direction[idx]
             move_delta += vec;
-        normalize_vec2(*move_delta);
+        
+        DEAD_ZONE :: 0.15;
+        if abs(gamepad.left_stick.x) > DEAD_ZONE
+            move_delta.x += gamepad.left_stick.x;
+        if abs(gamepad.left_stick.y) > DEAD_ZONE
+            move_delta.y -= gamepad.left_stick.y;
+
+        //normalize_vec2(*move_delta);
+
+
 
         move_actor(*player, move_delta * settings.player.speed * dt);
 
@@ -1136,7 +1146,7 @@ debug_callback :: (source: GLenum, type: GLenum, id: GLuint, severity: GLenum, l
     pctx := cast(*Context) userParam;
     ctx := <<pctx;
     push_context ctx {
-        #if OS_WINDOWS {
+        #if OS == .WINDOWS {
             // print("source: %\n", source);
             // print("type: %\n", type);
             // print("id: %\n", id);
@@ -1176,7 +1186,7 @@ init_game :: () {
     if running_at_compile_time() {
         set_working_directory(sprint("%1%2", #filepath, "../run_tree"));
     } else {
-        #if OS_MACOSX {
+        #if OS == .MACOS {
             bundle_dir := osx_get_bundle_resources_directory();
             print("Bundle Resource Directory: %\n", bundle_dir);
             set_working_directory(bundle_dir);
@@ -1480,7 +1490,7 @@ main :: () {
         array_add(*lights, light);
     }
 
-    #if OS_MACOSX {
+    #if OS == .MACOS {
         Objective_C :: #import "Objective_C";
         #import "Objective_C/LightweightRenderingView";
 
