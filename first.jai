@@ -31,7 +31,7 @@ build :: (building_executable := true, build_release := false) -> Workspace {
     opts.output_type = Build_Output_Type.EXECUTABLE;
     opts.output_executable_name = GAME_NAME;
     opts.output_path = "run_tree/";
-    w := compiler_create_workspace(sprint("% by Kevin Watters", GAME_NAME)); // I think this @Leaks ?
+    w := compiler_create_workspace(sprint("%", GAME_NAME)); // I think this @Leaks ?
     if building_executable then compiler_begin_intercept(w);
 
     if BUILD_COCOA_APP && OS == .MACOS {

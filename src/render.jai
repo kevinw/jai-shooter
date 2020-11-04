@@ -614,7 +614,7 @@ make_framebuffer :: (width: s32, height: s32, msaa := true, color := true, depth
     glBindFramebuffer(GL_FRAMEBUFFER, fbo.id);
 
     if color {
-        attach: [1] u32 = {:u32: GL_COLOR_ATTACHMENT0 };
+        attach: [1]u32 = .[ GL_COLOR_ATTACHMENT0 ];
         glDrawBuffers(xx attach.count, attach.data);
     }
 

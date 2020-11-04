@@ -6,13 +6,16 @@
 #import "Window_Creation";
 #import "Math";
 #import "GL";
+#import "Compiler";
+#run compiler_set_type_info_flags(GL_Procedures, .NO_SIZE_COMPLAINT);
+#run compiler_set_type_info_flags(ImGui, .NO_SIZE_COMPLAINT);
 Clipboard :: #import "Clipboard";
 Input :: #import "Input";
 
 #scope_file
 
 g_Time: float64 = 0.0;
-g_MousePressed: [3]bool = {:bool: false, false, false };
+g_MousePressed: [3]bool = .[ false, false, false ];
 g_MouseWheel: float = 0.0;
 g_FontTexture: GLuint = 0;
 g_ShaderHandle: GLuint = 0;
